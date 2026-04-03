@@ -166,48 +166,6 @@ Compute CRC32 hashes for files.
 - Verify file integrity
 - Generate checksums for mod validation
 
-### Command-Line Scripts
-
-#### analyze_accepted.py
-Analyze the structure of .pkg files.
-```bash
-python analyze_accepted.py
-```
-- Examine file headers and entry metadata
-- Debug package format issues
-
-#### compare_pkg_files.py
-Compare two .pkg files to identify differences.
-```bash
-python compare_pkg_files.py
-```
-- Diff package contents and structures
-- Identify changes between mod versions
-
-#### profile_pkg.py
-Profile the performance of package building.
-```bash
-python profile_pkg.py
-```
-- Measure build times and bottlenecks
-- Optimize large mod packages
-
-#### test_pkg_builder.py
-Test the package building functionality.
-```bash
-python test_pkg_builder.py
-```
-- Validate package creation with sample data
-- Ensure correct file packing and offsets
-
-#### main.py
-Command-line interface for basic modding operations.
-```bash
-python main.py
-```
-- Interactive prompts for unit creation
-- Library suggestions and validation
-
 ## File Formats Supported
 
 - **.pkg**: Halo Wars 2 package files (capack format)
@@ -216,22 +174,6 @@ python main.py
 - **.ecf**: Chunk files for materials and effects
 - **.dds/.ddx**: Texture formats
 - **.vis**: Visual asset files
-
-## Contributing
-
-We welcome contributions to improve the Halo Wars 2 Modding Suite! Please:
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly with various mod scenarios
-5. Submit a pull request with a clear description
-
-### Development Setup
-1. Install development dependencies
-2. Run tests: `python -m pytest` (if tests are added)
-3. Build and test the GUI application
-4. Ensure compatibility with different Python versions
 
 ## License
 
