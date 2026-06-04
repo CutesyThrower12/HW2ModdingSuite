@@ -1,0 +1,32 @@
+# Python cache and local runtime state
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Build and packaged output
+build/pyinstaller/
+dist/
+*.spec~
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+
+# Local review/holding folder from cleanup
+unecessary/
+
+# Debug symbols from bundled external tools
+*.pdb
+
+# Editor and OS noise
+.vscode/
+.idea/
+*.swp
+*.swo
+Thumbs.db
+Desktop.ini
+

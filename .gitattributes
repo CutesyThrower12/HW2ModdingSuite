@@ -1,0 +1,12 @@
+*.py text eol=lf
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.md text eol=lf
+*.json text eol=lf
+
+*.png binary
+*.ico binary
+*.mp4 binary
+*.exe binary
+*.dll binary
+*.pkg binary
