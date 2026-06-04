@@ -34,7 +34,7 @@ def main(page: ft.Page) -> None:
     page.window_height = 760
     page.window_min_width = 900
     page.window_min_height = 640
-    page.theme_mode = ft.ThemeMode.DARK
+    page.theme_mode = "dark"
     page.bgcolor = "#090d12"
     page.padding = 0
 
@@ -49,7 +49,7 @@ def main(page: ft.Page) -> None:
     commit_changes = ft.Checkbox(label="Commit launcher changes", value=True)
     push_changes = ft.Checkbox(label="Push to GitHub", value=False)
 
-    status = ft.Text("Ready", color=TEAL, weight=ft.FontWeight.BOLD)
+    status = ft.Text("Ready", color=TEAL, weight="bold")
     progress = ft.ProgressBar(value=0, color=TEAL, bgcolor="#1c2530")
     output = ft.TextField(
         label="Publish log",
@@ -131,20 +131,20 @@ def main(page: ft.Page) -> None:
 
     header = ft.Container(
         bgcolor="#121922",
-        padding=ft.padding.symmetric(horizontal=22, vertical=16),
+        padding=18,
         content=ft.Row(
             [
                 ft.Column(
                     [
-                        ft.Text("Nuphillion Publisher", size=24, weight=ft.FontWeight.BOLD, color="white"),
+                        ft.Text("Nuphillion Publisher", size=24, weight="bold", color="white"),
                         ft.Text("Build launcher-ready ZIP assets, commit them cleanly, and keep LFS handled.", size=12, color="white70"),
                     ],
                     spacing=2,
                     expand=True,
                 ),
-                ft.ElevatedButton("Publish", icon=ft.icons.ROCKET_LAUNCH, on_click=publish_clicked, bgcolor="#2b73e0", color="white"),
+                ft.ElevatedButton("Publish", icon="rocket_launch", on_click=publish_clicked, bgcolor="#2b73e0", color="white"),
             ],
-            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+            alignment="spaceBetween",
         ),
     )
 
@@ -154,12 +154,12 @@ def main(page: ft.Page) -> None:
         padding=18,
         content=ft.Column(
             [
-                ft.Text("Paths", size=16, weight=ft.FontWeight.BOLD, color=TEAL),
+                ft.Text("Paths", size=16, weight="bold", color=TEAL),
                 folder_row(launcher_repo, "Select NuphillionDev repo"),
                 folder_row(gts_dir, "Select compiled GTS output folder"),
                 folder_row(expansion_source, "Select loose expansion source folder"),
                 ft.Divider(height=18, color=BORDER),
-                ft.Text("Publish Toggles", size=16, weight=ft.FontWeight.BOLD, color=TEAL),
+                ft.Text("Publish Toggles", size=16, weight="bold", color=TEAL),
                 ft.Row([refresh_patch, refresh_expansion], spacing=24),
                 ft.Row([ensure_lfs, commit_changes, push_changes], spacing=24),
                 commit_message,
@@ -174,7 +174,7 @@ def main(page: ft.Page) -> None:
         padding=18,
         content=ft.Column(
             [
-                ft.Row([status], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                ft.Row([status], alignment="spaceBetween"),
                 progress,
                 output,
             ],
@@ -187,9 +187,9 @@ def main(page: ft.Page) -> None:
             [
                 header,
                 ft.Container(
-                    padding=ft.padding.all(18),
+                    padding=18,
                     expand=True,
-                    content=ft.Column([settings, log_panel], scroll=ft.ScrollMode.AUTO, spacing=16),
+                    content=ft.Column([settings, log_panel], scroll="auto", spacing=16),
                 ),
             ],
             expand=True,
