@@ -9,6 +9,8 @@ __pycache__/
 # Build and packaged output
 build/pyinstaller/
 dist/
+NuphillionPublisher/build/
+NuphillionPublisher/dist/
 *.spec~
 src-rust/**/target/
 
