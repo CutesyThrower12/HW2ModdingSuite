@@ -8,6 +8,9 @@ from flet import ProgressBar
 SRC_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SRC_DIR)
 BASE_DIR = getattr(sys, "_MEIPASS", PROJECT_ROOT)
+APP_NAME = "Halo Wars 2 Modding Suite"
+APP_DESCRIPTION = "Halo Wars 2 modding workflows, converters, packaging, and particle tools."
+APP_USER_MODEL_ID = "CutesyThrower12.HW2ModdingSuite"
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 os.chdir(BASE_DIR)
@@ -17,6 +20,167 @@ def runtime_path(*parts: str) -> str:
 
 def asset_path(name: str) -> str:
     return runtime_path("assets", name)
+
+def set_windows_app_identity() -> None:
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)
+    except Exception:
+        pass
+
+def relaunch_command() -> str:
+    if getattr(sys, "frozen", False):
+        return f'"{sys.executable}"'
+    return f'"{sys.executable}" "{os.path.abspath(sys.argv[0])}"'
+
+def apply_windows_taskbar_identity() -> None:
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+        import uuid
+        from ctypes import wintypes
+
+        user32 = ctypes.windll.user32
+        try:
+            ctypes.windll.ole32.CoInitialize(None)
+        except Exception:
+            pass
+        hwnds: list[int] = []
+        enum_proc_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+        def enum_proc(hwnd, _lparam):
+            if not user32.IsWindowVisible(hwnd):
+                return True
+            length = user32.GetWindowTextLengthW(hwnd)
+            if length <= 0:
+                return True
+            buffer = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW(hwnd, buffer, length + 1)
+            if APP_NAME in buffer.value:
+                hwnds.append(hwnd)
+                return False
+            return True
+
+        user32.EnumWindows(enum_proc_type(enum_proc), 0)
+        if not hwnds:
+            return
+
+        class GUID(ctypes.Structure):
+            _fields_ = [
+                ("Data1", wintypes.DWORD),
+                ("Data2", wintypes.WORD),
+                ("Data3", wintypes.WORD),
+                ("Data4", ctypes.c_ubyte * 8),
+            ]
+
+            def __init__(self, value: str):
+                parsed = uuid.UUID(value)
+                data4 = (ctypes.c_ubyte * 8).from_buffer_copy(parsed.bytes[8:])
+                super().__init__(parsed.time_low, parsed.time_mid, parsed.time_hi_version, data4)
+
+        class PROPERTYKEY(ctypes.Structure):
+            _fields_ = [("fmtid", GUID), ("pid", wintypes.DWORD)]
+
+        class PROPVARIANT(ctypes.Structure):
+            _fields_ = [
+                ("vt", ctypes.c_ushort),
+                ("wReserved1", ctypes.c_ushort),
+                ("wReserved2", ctypes.c_ushort),
+                ("wReserved3", ctypes.c_ushort),
+                ("p", ctypes.c_wchar_p),
+            ]
+
+        class IPropertyStore(ctypes.Structure):
+            pass
+
+        IPropertyStorePtr = ctypes.POINTER(IPropertyStore)
+        SetValueProto = ctypes.WINFUNCTYPE(
+            ctypes.HRESULT,
+            IPropertyStorePtr,
+            ctypes.POINTER(PROPERTYKEY),
+            ctypes.POINTER(PROPVARIANT),
+        )
+        CommitProto = ctypes.WINFUNCTYPE(ctypes.HRESULT, IPropertyStorePtr)
+        ReleaseProto = ctypes.WINFUNCTYPE(ctypes.c_ulong, IPropertyStorePtr)
+
+        class IPropertyStoreVtbl(ctypes.Structure):
+            _fields_ = [
+                ("QueryInterface", ctypes.c_void_p),
+                ("AddRef", ctypes.c_void_p),
+                ("Release", ReleaseProto),
+                ("GetCount", ctypes.c_void_p),
+                ("GetAt", ctypes.c_void_p),
+                ("GetValue", ctypes.c_void_p),
+                ("SetValue", SetValueProto),
+                ("Commit", CommitProto),
+            ]
+
+        IPropertyStore._fields_ = [("lpVtbl", ctypes.POINTER(IPropertyStoreVtbl))]
+
+        store = IPropertyStorePtr()
+        iid_store = GUID("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99")
+        hr = ctypes.windll.shell32.SHGetPropertyStoreForWindow(
+            hwnds[0],
+            ctypes.byref(iid_store),
+            ctypes.byref(store),
+        )
+        if hr != 0 or not store:
+            return
+
+        exe_path = sys.executable if getattr(sys, "frozen", False) else os.path.abspath(sys.argv[0])
+        icon_resource = f"{exe_path},0"
+        app_model_fmtid = "9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"
+        properties = [
+            (PROPERTYKEY(GUID(app_model_fmtid), 5), APP_USER_MODEL_ID),
+            (PROPERTYKEY(GUID(app_model_fmtid), 2), relaunch_command()),
+            (PROPERTYKEY(GUID(app_model_fmtid), 4), APP_NAME),
+            (PROPERTYKEY(GUID(app_model_fmtid), 3), icon_resource),
+        ]
+
+        try:
+            for key, value in properties:
+                variant = PROPVARIANT()
+                variant.vt = 31
+                variant.p = value
+                store.contents.lpVtbl.contents.SetValue(store, ctypes.byref(key), ctypes.byref(variant))
+            store.contents.lpVtbl.contents.Commit(store)
+        finally:
+            store.contents.lpVtbl.contents.Release(store)
+    except Exception:
+        pass
+
+def centered_window_position(width: int, height: int) -> tuple[int, int] | None:
+    try:
+        if os.name == "nt":
+            import ctypes
+            from ctypes import wintypes
+
+            rect = wintypes.RECT()
+            if ctypes.windll.user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(rect), 0):
+                screen_w = rect.right - rect.left
+                screen_h = rect.bottom - rect.top
+                return (
+                    rect.left + max(0, (screen_w - width) // 2),
+                    rect.top + max(0, (screen_h - height) // 2),
+                )
+
+            return (
+                max(0, (ctypes.windll.user32.GetSystemMetrics(0) - width) // 2),
+                max(0, (ctypes.windll.user32.GetSystemMetrics(1) - height) // 2),
+            )
+
+        import tkinter as _tk
+        root = _tk.Tk()
+        root.withdraw()
+        screen_w = root.winfo_screenwidth()
+        screen_h = root.winfo_screenheight()
+        root.destroy()
+        return (max(0, (screen_w - width) // 2), max(0, (screen_h - height) // 2))
+    except Exception:
+        return None
 
 if "--particle-editor" in sys.argv:
     from pfx_editor_pyside import main as _particle_editor_main
@@ -38,90 +202,71 @@ from Modules.shared_styles_fix import (
     CARD_PADDING, RADIUS, PANEL_WIDTH, HERO_WIDTH, TEXT_MUTED, SMALL_WIDTH,
 )
 
-def main(page: Page):
-    page.title = "Halo Wars 2 Modding Suite"
+set_windows_app_identity()
+
+def configure_startup_window(page: Page):
+    page.title = APP_NAME
     page.theme_mode = "dark"
     page.bgcolor = "#121212"
     page.window.icon = asset_path("icon.ico")
-    # Defer centering until after the UI is constructed (done in load_main_ui())
     page.window.width = 1200
     page.window.height = 800
+    page.window.visible = False
+    start_position = centered_window_position(1200, 800)
+    if start_position is not None:
+        page.window.left, page.window.top = start_position
 
-    # Early aggressive attempt to set window position immediately to avoid visible jump
+def reveal_window(page: Page):
     try:
-        try:
-            w_early = int(page.window.width)
-        except Exception:
-            w_early = getattr(page.window, 'width', None) or 1200
-        try:
-            h_early = int(page.window.height)
-        except Exception:
-            h_early = getattr(page.window, 'height', None) or 800
-        if os.name == 'nt':
-            try:
-                import ctypes
-                from ctypes import wintypes
-
-                SPI_GETWORKAREA = 0x0030
-
-                class RECT(ctypes.Structure):
-                    _fields_ = [('left', wintypes.LONG), ('top', wintypes.LONG), ('right', wintypes.LONG), ('bottom', wintypes.LONG)]
-
-                rect = RECT()
-                ok = ctypes.windll.user32.SystemParametersInfoW(SPI_GETWORKAREA, 0, ctypes.byref(rect), 0)
-                if ok:
-                    screen_w = rect.right - rect.left
-                    screen_h = rect.bottom - rect.top
-                    left_early = rect.left + max(0, (screen_w - w_early) // 2)
-                    top_early = rect.top + max(0, (screen_h - h_early) // 2)
-                    try:
-                        page.window.left = int(left_early)
-                        page.window.top = int(top_early)
-                        try:
-                            page.update()
-                        except Exception:
-                            pass
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-        else:
-            try:
-                import tkinter as _tk
-                root = _tk.Tk()
-                root.withdraw()
-                screen_w = root.winfo_screenwidth()
-                screen_h = root.winfo_screenheight()
-                root.destroy()
-                left_early = max(0, (screen_w - w_early) // 2)
-                top_early = max(0, (screen_h - h_early) // 2)
-                try:
-                    page.window.left = int(left_early)
-                    page.window.top = int(top_early)
-                    try:
-                        page.update()
-                    except Exception:
-                        pass
-                except Exception:
-                    pass
-            except Exception:
-                pass
+        page.window.visible = True
+        page.update()
     except Exception:
         pass
+    apply_windows_taskbar_identity()
 
-    INTRO_DURATION = 8.0  # seconds
+def main(page: Page):
+    window_revealed = False
+
+    def schedule_window_reveal():
+        nonlocal window_revealed
+        if window_revealed:
+            return
+        window_revealed = True
+
+        async def _reveal():
+            try:
+                await asyncio.wait_for(page.window.wait_until_ready_to_show(), timeout=2.0)
+            except Exception:
+                pass
+            reveal_window(page)
+            await asyncio.sleep(0.4)
+            apply_windows_taskbar_identity()
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop and loop.is_running():
+            loop.create_task(_reveal())
+        else:
+            asyncio.run(_reveal())
+
+    try:
+        INTRO_DURATION = max(0.0, float(os.getenv("INTRO_SECONDS", "8.0")))
+    except ValueError:
+        INTRO_DURATION = 8.0
 
     INTRO_PATH = asset_path("intro.mp4")
     PLAY_INTRO = (os.getenv("SKIP_INTRO", "0") != "1") and os.path.exists(INTRO_PATH)
     intro_finalized = False
+    finish_intro_handler = None
 
-    # Only create and add the intro video/overlay if the intro file exists and intro is enabled
     if PLAY_INTRO:
         fade_layer = Container(
             bgcolor="black",
             opacity=1.0,
             expand=True,
-            animate_opacity=Animation(1000, "easeOut"),
+            animate_opacity=Animation(450, "easeOut"),
         )
         intro_video = None
         try:
@@ -134,100 +279,63 @@ def main(page: Page):
                 muted=False,
             )
 
-            def skip_intro(e=None):
+            def stop_intro_video():
                 nonlocal fade_layer, intro_video, intro_finalized
                 try:
                     if intro_video is not None and hasattr(intro_video, "stop"):
                         try:
                             res = intro_video.stop()
-                            # if stop returned a coroutine, schedule it on the running loop
                             if inspect.isawaitable(res):
-                                    try:
-                                        loop = asyncio.get_running_loop()
-                                    except RuntimeError:
-                                        loop = None
-                                    if loop and loop.is_running():
-                                        async def _safe_stop(coro):
-                                            try:
-                                                await coro
-                                            except Exception:
-                                                pass
-                                        loop.create_task(_safe_stop(res))
+                                try:
+                                    loop = asyncio.get_running_loop()
+                                except RuntimeError:
+                                    loop = None
+                                if loop and loop.is_running():
+                                    async def _safe_stop(coro):
+                                        try:
+                                            await coro
+                                        except Exception:
+                                            pass
+                                    loop.create_task(_safe_stop(res))
                         except Exception:
                             pass
                 except Exception:
                     pass
-                # mark that we've already finalized intro and load UI now
+
+            async def finish_intro():
+                nonlocal intro_finalized
+                if intro_finalized:
+                    return
                 intro_finalized = True
-                fade_layer = None
                 try:
-                    load_main_ui()
+                    if fade_layer is not None:
+                        fade_layer.animate_opacity = Animation(300, "easeInOut")
+                        fade_layer.opacity = 1
+                        page.update()
+                        await asyncio.sleep(0.32)
                 except Exception:
                     pass
-
-            # Attempt to center the window immediately so the intro appears centered
-            try:
+                stop_intro_video()
                 try:
-                    w = int(page.window.width)
+                    page.on_keyboard_event = None
                 except Exception:
-                    w = getattr(page.window, 'width', None) or 1200
+                    pass
+                load_main_ui()
+            finish_intro_handler = finish_intro
+
+            def skip_intro(e=None):
                 try:
-                    h = int(page.window.height)
-                except Exception:
-                    h = getattr(page.window, 'height', None) or 800
-                left = None
-                top = None
-                if os.name == 'nt':
-                    try:
-                        import ctypes
-                        from ctypes import wintypes
-
-                        SPI_GETWORKAREA = 0x0030
-
-                        class RECT(ctypes.Structure):
-                            _fields_ = [('left', wintypes.LONG), ('top', wintypes.LONG), ('right', wintypes.LONG), ('bottom', wintypes.LONG)]
-
-                        rect = RECT()
-                        ok = ctypes.windll.user32.SystemParametersInfoW(SPI_GETWORKAREA, 0, ctypes.byref(rect), 0)
-                        if ok:
-                            screen_w = rect.right - rect.left
-                            screen_h = rect.bottom - rect.top
-                            left = rect.left + max(0, (screen_w - w) // 2)
-                            top = rect.top + max(0, (screen_h - h) // 2)
-                    except Exception:
-                        left = None
-                        top = None
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    loop = None
+                if loop and loop.is_running():
+                    loop.create_task(finish_intro_handler())
                 else:
-                    try:
-                        import tkinter as _tk
-                        root = _tk.Tk()
-                        root.withdraw()
-                        screen_w = root.winfo_screenwidth()
-                        screen_h = root.winfo_screenheight()
-                        root.destroy()
-                        left = max(0, (screen_w - w) // 2)
-                        top = max(0, (screen_h - h) // 2)
-                    except Exception:
-                        left = None
-                        top = None
+                    asyncio.run(finish_intro_handler())
 
-                if left is not None and top is not None:
-                    try:
-                        page.window.left = int(left)
-                        page.window.top = int(top)
-                        try:
-                            page.update()
-                        except Exception:
-                            pass
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-
-            # add intro video and dark fade overlay
             page.add(Stack([intro_video, fade_layer], expand=True))
+            schedule_window_reveal()
 
-            # register a keyboard handler to skip intro on Spacebar
             def _on_key(e):
                 try:
                     k = None
@@ -239,14 +347,9 @@ def main(page: Page):
                         k = e.data
                     elif hasattr(e, "key_code"):
                         k = e.key_code
-                    # accept numeric 32 or string matches
                     if k in (" ", "Space", "Spacebar", 32) or str(k).lower() == "space":
                         try:
                             skip_intro()
-                        except Exception:
-                            pass
-                        try:
-                            page.on_keyboard_event = None
                         except Exception:
                             pass
                 except Exception:
@@ -264,7 +367,6 @@ def main(page: Page):
         fade_layer = None
 
     async def play_intro_then_load_ui():
-        # fade out overlay so intro is visible, wait then load main UI
         nonlocal intro_finalized
         if intro_finalized:
             return
@@ -274,162 +376,13 @@ def main(page: Page):
                 page.update()
             except Exception:
                 pass
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.45)
         await asyncio.sleep(INTRO_DURATION)
-        if intro_finalized:
-            return
-        if fade_layer is not None:
-            try:
-                fade_layer.animate_opacity = Animation(1000, "easeOut")
-                fade_layer.opacity = 0
-                page.update()
-            except Exception:
-                pass
-        await asyncio.sleep(0.25)
-        if not intro_finalized:
+        if finish_intro_handler is not None:
+            await finish_intro_handler()
+        elif not intro_finalized:
             intro_finalized = True
             load_main_ui()
-
-    def _center_window_exact():
-        try:
-            # prefer work area (excludes taskbar) on Windows
-            try:
-                w = int(page.window.width)
-            except Exception:
-                w = getattr(page.window, 'width', None) or 1200
-            try:
-                h = int(page.window.height)
-            except Exception:
-                h = getattr(page.window, 'height', None) or 800
-            left = None
-            top = None
-            if os.name == 'nt':
-                try:
-                    import ctypes
-                    from ctypes import wintypes
-
-                    SPI_GETWORKAREA = 0x0030
-
-                    class RECT(ctypes.Structure):
-                        _fields_ = [('left', wintypes.LONG), ('top', wintypes.LONG), ('right', wintypes.LONG), ('bottom', wintypes.LONG)]
-
-                    rect = RECT()
-                    ok = ctypes.windll.user32.SystemParametersInfoW(SPI_GETWORKAREA, 0, ctypes.byref(rect), 0)
-                    if ok:
-                        screen_w = rect.right - rect.left
-                        screen_h = rect.bottom - rect.top
-                        left = rect.left + max(0, (screen_w - w) // 2)
-                        top = rect.top + max(0, (screen_h - h) // 2)
-                    else:
-                        screen_w = ctypes.windll.user32.GetSystemMetrics(0)
-                        screen_h = ctypes.windll.user32.GetSystemMetrics(1)
-                        left = max(0, (screen_w - w) // 2)
-                        top = max(0, (screen_h - h) // 2)
-                except Exception:
-                    left = None
-                    top = None
-            else:
-                try:
-                    import tkinter as _tk
-                    root = _tk.Tk()
-                    root.withdraw()
-                    screen_w = root.winfo_screenwidth()
-                    screen_h = root.winfo_screenheight()
-                    root.destroy()
-                    left = max(0, (screen_w - w) // 2)
-                    top = max(0, (screen_h - h) // 2)
-                except Exception:
-                    left = None
-                    top = None
-
-            if left is not None and top is not None:
-                try:
-                    page.window.left = int(left)
-                    page.window.top = int(top)
-                    try:
-                        page.update()
-                    except Exception:
-                        pass
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
-    def _ensure_window_position_immediate(attempts: int = 30, delay: float = 0.02):
-        try:
-            import time as _time
-            # compute desired left/top once
-            try:
-                w = int(page.window.width)
-            except Exception:
-                w = getattr(page.window, 'width', None) or 1200
-            try:
-                h = int(page.window.height)
-            except Exception:
-                h = getattr(page.window, 'height', None) or 800
-
-            desired_left = None
-            desired_top = None
-            if os.name == 'nt':
-                try:
-                    import ctypes
-                    from ctypes import wintypes
-                    SPI_GETWORKAREA = 0x0030
-
-                    class RECT(ctypes.Structure):
-                        _fields_ = [('left', wintypes.LONG), ('top', wintypes.LONG), ('right', wintypes.LONG), ('bottom', wintypes.LONG)]
-
-                    rect = RECT()
-                    ok = ctypes.windll.user32.SystemParametersInfoW(SPI_GETWORKAREA, 0, ctypes.byref(rect), 0)
-                    if ok:
-                        screen_w = rect.right - rect.left
-                        screen_h = rect.bottom - rect.top
-                        desired_left = rect.left + max(0, (screen_w - w) // 2)
-                        desired_top = rect.top + max(0, (screen_h - h) // 2)
-                except Exception:
-                    desired_left = None
-                    desired_top = None
-            else:
-                try:
-                    import tkinter as _tk
-                    root = _tk.Tk()
-                    root.withdraw()
-                    screen_w = root.winfo_screenwidth()
-                    screen_h = root.winfo_screenheight()
-                    root.destroy()
-                    desired_left = max(0, (screen_w - w) // 2)
-                    desired_top = max(0, (screen_h - h) // 2)
-                except Exception:
-                    desired_left = None
-                    desired_top = None
-
-            if desired_left is None or desired_top is None:
-                return
-
-            for _ in range(max(1, attempts)):
-                try:
-                    page.window.left = int(desired_left)
-                    page.window.top = int(desired_top)
-                    try:
-                        page.update()
-                    except Exception:
-                        pass
-                    # quick check: if applied, break
-                    try:
-                        cur_l = int(getattr(page.window, 'left', -9999))
-                        cur_t = int(getattr(page.window, 'top', -9999))
-                        if cur_l == int(desired_left) and cur_t == int(desired_top):
-                            break
-                    except Exception:
-                        pass
-                except Exception:
-                    pass
-                try:
-                    _time.sleep(max(0.001, float(delay)))
-                except Exception:
-                    pass
-        except Exception:
-            pass
 
     def load_main_ui():
             page.clean()
@@ -1338,12 +1291,13 @@ def main(page: Page):
                 compile_progress_bar = ProgressBar(value=0, width=900)
                 compile_progress_label = Text("Idle", size=12)
                 launch_after_checkbox = Checkbox(label="Launch Halo Wars 2 after compile", value=False)
+                include_loose_xml_checkbox = Checkbox(label="Include loose editable .xml files in package", value=False)
                 ancilla_output = TextField(label="Ancilla Output", multiline=True, min_lines=8, max_lines=20, width=900, bgcolor=OUTPUT_BG)
 
-                def package_directory_to_pkg(src_dir, dest_pkg, progress_callback=None):
+                def package_directory_to_pkg(src_dir, dest_pkg, progress_callback=None, include_loose_xml=False):
                     try:
                         from Modules.pkg_builder import build_pkg_from_directory
-                        return build_pkg_from_directory(src_dir, dest_pkg, progress_callback)
+                        return build_pkg_from_directory(src_dir, dest_pkg, progress_callback, include_loose_xml=include_loose_xml)
                     except Exception as ex:
                         print(f"Error in package_directory_to_pkg: {ex}")
                         return False
@@ -1519,9 +1473,9 @@ def main(page: Page):
 
                     try:
                         loop = asyncio.get_running_loop()
-                        ok = await loop.run_in_executor(None, package_directory_to_pkg, dir_path, dest_pkg, _progress_tick)
+                        ok = await loop.run_in_executor(None, package_directory_to_pkg, dir_path, dest_pkg, _progress_tick, bool(include_loose_xml_checkbox.value))
                     except Exception:
-                        ok = package_directory_to_pkg(dir_path, dest_pkg, _progress_tick)
+                        ok = package_directory_to_pkg(dir_path, dest_pkg, _progress_tick, bool(include_loose_xml_checkbox.value))
 
                     if not ok or not os.path.exists(dest_pkg):
                         page.snack_bar = SnackBar(Text("Packaging failed."), open=True)
@@ -1628,7 +1582,7 @@ def main(page: Page):
                 build_tab = Column([
                     Text("Compile Mod Builder", size=20, weight="bold"),
                     Row([pkg_file_field, pkg_browse_btn], alignment="center"),
-                    Row([compile_btn, launch_after_checkbox], spacing=12),
+                    Row([compile_btn, launch_after_checkbox, include_loose_xml_checkbox], spacing=12),
                     Divider(),
                     compile_progress_label,
                     compile_progress_bar,
@@ -2387,39 +2341,7 @@ def main(page: Page):
 
             # Start on Home
             set_top_content(home_content)
-
-            # Center the window after the UI has been constructed so sizing/layout are final
-            try:
-                loop = asyncio.get_running_loop()
-            except RuntimeError:
-                loop = None
-            async def _delayed_center():
-                try:
-                    await asyncio.sleep(0.03)
-                except Exception:
-                    pass
-                try:
-                    _center_window_exact()
-                except Exception:
-                    try:
-                        # fallback to flet's center coroutine
-                        await page.window.center()
-                    except Exception:
-                        pass
-
-            if loop and loop.is_running():
-                try:
-                    loop.create_task(_delayed_center())
-                except Exception:
-                    try:
-                        _center_window_exact()
-                    except Exception:
-                        pass
-            else:
-                try:
-                    _center_window_exact()
-                except Exception:
-                    pass
+            schedule_window_reveal()
 
     # Schedule the intro coroutine on the existing event loop instead of calling asyncio.run()
     try:
@@ -2438,4 +2360,11 @@ def main(page: Page):
 
 
 if __name__ == "__main__":
-    flet.run(main)
+    if os.name == "nt":
+        os.environ.setdefault("FLET_HIDE_WINDOW_ON_START", "true")
+    flet.run(
+        main,
+        before_main=configure_startup_window,
+        name="HW2ModdingSuite",
+        view=getattr(flet.AppView, "FLET_APP_HIDDEN", flet.AppView.FLET_APP),
+    )

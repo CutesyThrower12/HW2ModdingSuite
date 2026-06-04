@@ -16,7 +16,10 @@ Format:
 """
 
 import os
+import shutil
 import struct
+import subprocess
+import sys
 
 
 class CaPackageEntry:
@@ -143,6 +146,10 @@ class CaPackageFile:
                 entry.size = len(data)
             elif entry.file_path:
                 entry.size = os.path.getsize(entry.file_path)
+            if self.alignment > 0:
+                remainder = current_relative_offset % self.alignment
+                if remainder:
+                    current_relative_offset += self.alignment - remainder
             entry.offset = current_relative_offset
             serialized_entries.append(entry.serialize())
             current_relative_offset += entry.size
@@ -160,12 +167,19 @@ class CaPackageFile:
             output += b'\x00'
         
         # Write all file data
+        current_relative_offset = 0
         for entry, data in self.entries:
+            if current_relative_offset < entry.offset:
+                output += b'\x00' * (entry.offset - current_relative_offset)
+                current_relative_offset = entry.offset
             if data is not None:
                 output += data
+                current_relative_offset += len(data)
             elif entry.file_path:
                 with open(entry.file_path, 'rb') as f:
-                    output += f.read()
+                    chunk = f.read()
+                    output += chunk
+                    current_relative_offset += len(chunk)
         
         return output
     
@@ -198,8 +212,14 @@ class CaPackageFile:
         
         # 3) Calculate total file size
         total_size = first_file_absolute_offset
+        current_relative_offset = 0
         for entry, _ in self.entries:
-            total_size += entry.size
+            if self.alignment > 0:
+                remainder = current_relative_offset % self.alignment
+                if remainder:
+                    current_relative_offset += self.alignment - remainder
+            current_relative_offset += entry.size
+        total_size += current_relative_offset
         
         # 4) Create and pre-allocate output file
         with open(output_path, 'wb') as out_f:
@@ -226,6 +246,10 @@ class CaPackageFile:
                         entry.size = len(data)
                     elif entry.file_path:
                         entry.size = os.path.getsize(entry.file_path)
+                    if self.alignment > 0:
+                        remainder = current_relative_offset % self.alignment
+                        if remainder:
+                            current_relative_offset += self.alignment - remainder
                     entry.offset = current_relative_offset
                     current_relative_offset += entry.size
                 
@@ -245,15 +269,14 @@ class CaPackageFile:
                 
                 # 11) Write file data
                 for entry, data in self.entries:
+                    pos = first_file_absolute_offset + entry.offset
                     if data is not None:
                         mm_out[pos:pos+len(data)] = data
-                        pos += len(data)
                     elif entry.file_path:
                         with open(entry.file_path, 'rb') as in_f:
                             mm_in = mmap.mmap(in_f.fileno(), 0, access=mmap.ACCESS_READ)
                             try:
                                 mm_out[pos:pos+entry.size] = mm_in[:entry.size]
-                                pos += entry.size
                             finally:
                                 mm_in.close()
             finally:
@@ -317,9 +340,14 @@ class CaPackageFile:
             pkg.alignment = struct.unpack('<q', data[offset:offset+8])[0]
             offset += 8
         
+        if version >= CaPackageFile.VERSION_USES_ALIGNMENT and pkg.alignment > 0:
+            remainder = offset % pkg.alignment
+            if remainder:
+                offset += pkg.alignment - remainder
+
         # offset now points to start of file data section
         first_file_data_offset = offset
-        
+
         # Extract file data using relative offsets
         files = {}
         for name, rel_offset, file_size in entries:
@@ -330,7 +358,150 @@ class CaPackageFile:
         return pkg, files
 
 
-def build_pkg_from_directory(source_dir, output_path, progress_callback=None):
+def _project_root_candidates():
+    candidates = []
+    if hasattr(sys, "_MEIPASS"):
+        candidates.append(sys._MEIPASS)
+    here = os.path.abspath(os.path.dirname(__file__))
+    candidates.append(os.path.abspath(os.path.join(here, "..", "..")))
+    candidates.append(os.getcwd())
+    return candidates
+
+
+def _find_fast_packager():
+    exe_name = "hw2pkg.exe" if os.name == "nt" else "hw2pkg"
+    for root in _project_root_candidates():
+        candidate = os.path.join(root, "tools", "HW2Packager", exe_name)
+        if os.path.exists(candidate):
+            return candidate
+        candidate = os.path.join(root, "tools", "HW2Packager", "target", "release", exe_name)
+        if os.path.exists(candidate):
+            return candidate
+    return None
+
+
+def _build_with_fast_packager(source_dir, output_path, embed_streaming_videos=False, include_loose_xml=False):
+    packager = _find_fast_packager()
+    if not packager:
+        return False
+
+    creationflags = 0
+    startupinfo = None
+    if os.name == "nt":
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        try:
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = subprocess.SW_HIDE
+        except Exception:
+            startupinfo = None
+
+    command = [packager, "package", source_dir, "-o", output_path]
+    if embed_streaming_videos:
+        command.append("--embed-streaming-videos")
+    if include_loose_xml:
+        command.append("--include-loose-xml")
+
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        creationflags=creationflags,
+        startupinfo=startupinfo,
+    )
+    if result.returncode != 0:
+        message = (result.stderr or result.stdout or "Fast packager failed").strip()
+        raise RuntimeError(message)
+    message = (result.stderr or result.stdout).strip()
+    if message:
+        print(message)
+    return os.path.exists(output_path)
+
+
+def _normalize_manifest_path(value):
+    value = value.strip().lstrip("\ufeff")
+    if not value or value.startswith("#") or value.startswith("//"):
+        return None
+    if value.lower() == "v2":
+        return None
+    normalized = value.lstrip("\\/").replace("/", "\\").lower()
+    return normalized or None
+
+
+def _manifest_filter(source_dir):
+    manifest_path = os.path.join(source_dir, "file_manifest.txt")
+    if not os.path.isfile(manifest_path):
+        return None
+
+    allowed = set()
+    with open(manifest_path, "r", encoding="utf-8-sig", errors="replace") as manifest:
+        for line in manifest:
+            normalized = _normalize_manifest_path(line)
+            if normalized:
+                allowed.add(normalized)
+                allowed.add("data\\" + normalized)
+                if normalized.endswith((".xml", ".pfx", ".tactics")):
+                    compiled = normalized + ".xmb"
+                    allowed.add(compiled)
+                    allowed.add("data\\" + compiled)
+    return allowed
+
+
+def _package_source_root(source_dir, allowed_paths=None):
+    return source_dir
+
+
+def _is_streaming_video(path):
+    return os.path.splitext(path)[1].lower() in (".bk2", ".bik")
+
+
+def _loose_output_root(output_path):
+    folder = os.path.splitext(os.path.basename(output_path))[0] + "_loose"
+    return os.path.join(os.path.dirname(output_path) or ".", folder)
+
+
+def _copy_streaming_sidecars(output_path, streaming_files):
+    if not streaming_files:
+        return None
+
+    loose_root = _loose_output_root(output_path)
+    for full_path, rel_path in streaming_files:
+        destination = os.path.join(loose_root, *rel_path.replace("/", "\\").split("\\"))
+        os.makedirs(os.path.dirname(destination), exist_ok=True)
+        shutil.copy2(full_path, destination)
+    return loose_root
+
+
+def _is_loose_editable_xml(path):
+    return os.path.splitext(path)[1].lower() == ".xml"
+
+
+def _should_package_relpath(rel_path, full_path=None, allowed_paths=None, include_loose_xml=False):
+    normalized = rel_path.replace("/", "\\").lower()
+    if not include_loose_xml and full_path and _is_loose_editable_xml(full_path):
+        return False
+    if allowed_paths is not None:
+        return normalized in allowed_paths
+    if normalized == "file_manifest.txt":
+        return False
+    if (
+        normalized == "data.pkg"
+        or normalized == "workspace.code-workspace"
+        or normalized.endswith(".code-workspace")
+        or normalized.startswith("_tmp")
+    ):
+        return False
+    return normalized.startswith("data\\")
+
+
+def build_pkg_from_directory(
+    source_dir,
+    output_path,
+    progress_callback=None,
+    prefer_fast_packager=True,
+    embed_streaming_videos=False,
+    include_loose_xml=False,
+):
     """
     Build a PKG file from a directory recursively.
     
@@ -343,16 +514,54 @@ def build_pkg_from_directory(source_dir, output_path, progress_callback=None):
         bool: True if successful
     """
     try:
+        if prefer_fast_packager:
+            try:
+                ok = _build_with_fast_packager(
+                    source_dir,
+                    output_path,
+                    embed_streaming_videos=embed_streaming_videos,
+                    include_loose_xml=include_loose_xml,
+                )
+                if ok:
+                    if progress_callback:
+                        progress_callback(1, 1)
+                    return True
+            except Exception as ex:
+                print(f"Fast packager unavailable; falling back to Python packager: {ex}")
+
+        allowed_paths = _manifest_filter(source_dir)
+        package_root = _package_source_root(source_dir, allowed_paths)
+
         # Collect all files
         files = []
-        for root, dirs, filenames in os.walk(source_dir):
+        streaming_files = []
+        for root, dirs, filenames in os.walk(package_root):
             for fn in filenames:
                 full_path = os.path.join(root, fn)
-                rel_path = os.path.relpath(full_path, source_dir)
+                rel_path = os.path.relpath(full_path, package_root)
+                if not _should_package_relpath(
+                    rel_path,
+                    full_path=full_path,
+                    allowed_paths=allowed_paths,
+                    include_loose_xml=include_loose_xml,
+                ):
+                    continue
+                if _is_streaming_video(full_path) and not embed_streaming_videos:
+                    streaming_files.append((full_path, rel_path))
+                    continue
                 files.append((full_path, rel_path))
         
+        loose_root = _copy_streaming_sidecars(output_path, streaming_files)
+        if loose_root:
+            print(
+                f"Wrote {len(streaming_files)} loose streaming video file(s) to {loose_root}. "
+                "Deploy these loose files with the package; Halo Wars 2 crashes when frontend videos are embedded in capack."
+            )
+
         if not files:
             raise ValueError("No files found in directory")
+
+        files.sort(key=lambda item: ("\\" + item[1].replace("/", "\\")).lower())
         
         # Create package
         pkg = CaPackageFile()

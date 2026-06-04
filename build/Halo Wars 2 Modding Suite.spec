@@ -25,7 +25,16 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=[
+        'PySide6.QtQml',
+        'PySide6.QtQuick',
+        'PySide6.QtWebEngineCore',
+        'PySide6.QtWebEngineWidgets',
+        'PySide6.QtNetwork',
+        'PySide6.QtSql',
+        'PySide6.QtTest',
+        'PySide6.QtDesigner',
+    ],
     noarchive=False,
     optimize=2,  # release
 )
@@ -43,7 +52,8 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,        # requires upx installed to actually compress
+    upx=False,       # faster local builds; larger exe is worth the iteration speed
     console=False,   # no console window
     icon='assets\\icon.ico',
+    version='build\\version_info.txt',
 )

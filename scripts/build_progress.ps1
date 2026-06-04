@@ -118,8 +118,10 @@ $args = @(
     "--onefile",
     "--noconsole",
     "--noconfirm",
+    "--noupx",
     "--name", "Halo Wars 2 Modding Suite",
     "--icon", (Join-Path $Project "assets\icon.ico"),
+    "--version-file", (Join-Path $Project "build\version_info.txt"),
     "--paths", (Join-Path $Project "src"),
     "--add-data=$((Join-Path $Project "assets\background.png")):assets",
     "--add-data=$((Join-Path $Project "assets\icon.ico")):assets",
@@ -134,6 +136,12 @@ $args = @(
     "--hidden-import", "PySide6.QtWidgets",
     "--exclude-module", "PySide6.QtQml",
     "--exclude-module", "PySide6.QtQuick",
+    "--exclude-module", "PySide6.QtWebEngineCore",
+    "--exclude-module", "PySide6.QtWebEngineWidgets",
+    "--exclude-module", "PySide6.QtNetwork",
+    "--exclude-module", "PySide6.QtSql",
+    "--exclude-module", "PySide6.QtTest",
+    "--exclude-module", "PySide6.QtDesigner",
     "--collect-all", "flet_desktop",
     "--collect-all", "flet",
     "--workpath", $WorkPath,
@@ -146,7 +154,50 @@ if ($IncludeIntro) {
 }
 
 $distExe = Join-Path $DistPath "Halo Wars 2 Modding Suite.exe"
-Remove-Item -LiteralPath $distExe -Force -ErrorAction SilentlyContinue
+
+function Get-LatestInputWriteTimeUtc([string[]]$paths) {
+    $latest = [DateTime]::MinValue
+    foreach ($path in $paths) {
+        if (-not (Test-Path -LiteralPath $path)) {
+            continue
+        }
+        $item = Get-Item -LiteralPath $path -Force
+        if ($item.PSIsContainer) {
+            foreach ($child in Get-ChildItem -LiteralPath $path -File -Recurse -Force -ErrorAction SilentlyContinue) {
+                if ($child.FullName -like "*\__pycache__\*") { continue }
+                if ($child.FullName -like "*\.pytest_cache\*") { continue }
+                if ($child.LastWriteTimeUtc -gt $latest) {
+                    $latest = $child.LastWriteTimeUtc
+                }
+            }
+        } elseif ($item.LastWriteTimeUtc -gt $latest) {
+            $latest = $item.LastWriteTimeUtc
+        }
+    }
+    return $latest
+}
+
+$buildInputs = @(
+    (Join-Path $Project "src"),
+    (Join-Path $Project "tools"),
+    (Join-Path $Project "assets\background.png"),
+    (Join-Path $Project "assets\icon.ico"),
+    (Join-Path $Project "build\version_info.txt"),
+    $PSCommandPath
+)
+if ($IncludeIntro) {
+    $buildInputs += (Join-Path $Project "assets\intro.mp4")
+}
+
+if ((Test-Path -LiteralPath $distExe) -and ($env:HW2_FORCE_REBUILD -ne "1")) {
+    $exeTime = (Get-Item -LiteralPath $distExe).LastWriteTimeUtc
+    $latestInput = Get-LatestInputWriteTimeUtc $buildInputs
+    if ($latestInput -ne [DateTime]::MinValue -and $exeTime -ge $latestInput) {
+        Write-BuildProgress 100.0 0.0 0.0 "cached executable current"
+        Write-Host ""
+        exit 0
+    }
+}
 
 $started = Get-Date
 $startInfo = [System.Diagnostics.ProcessStartInfo]::new()

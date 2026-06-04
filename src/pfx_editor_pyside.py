@@ -327,25 +327,20 @@ def simple_value(block_text: str, tag_name: str) -> str:
 
 
 def is_inside_tag(block_text: str, position: int, tag_name: str) -> bool:
+    lower = block_text[:position].lower()
     tag = tag_name.lower()
-    open_re = re.compile(rf"<{re.escape(tag_name)}\b[^>]*>", re.IGNORECASE)
-    close_re = re.compile(rf"</{re.escape(tag_name)}>", re.IGNORECASE)
-    last_open = -1
-    last_close = -1
-    for match in open_re.finditer(block_text, 0, position):
-        last_open = match.start()
-    for match in close_re.finditer(block_text, 0, position):
-        last_close = match.start()
-    return last_open > last_close and tag in block_text[last_open:position].lower()
+    last_open = lower.rfind(f"<{tag}")
+    last_close = lower.rfind(f"</{tag}>")
+    return last_open > last_close
 
 
 def gradient_info(block_text: str, position: int) -> tuple[str, str]:
-    gradient_starts = [match.start() for match in re.finditer(r"<GradientPoint\b[^>]*>", block_text[:position], re.IGNORECASE)]
-    point_index = len(gradient_starts)
-    if point_index == 0:
+    before = block_text[:position]
+    point_index = len(re.findall(r"<GradientPoint\b", before, re.IGNORECASE))
+    point_start = before.lower().rfind("<gradientpoint")
+    if point_index == 0 or point_start < 0:
         return "Progression color", ""
 
-    point_start = gradient_starts[-1]
     point_close = re.search(r"</GradientPoint>", block_text[position:], re.IGNORECASE)
     point_end = position + point_close.end() if point_close else len(block_text)
     point_text = block_text[point_start:point_end]
@@ -366,6 +361,23 @@ def color_info_for_match(block_text: str, position: int, tag_name: str) -> tuple
         palette_index = len(list(re.finditer(r"<Color\b", block_text[:position], re.IGNORECASE)))
         return f"Palette color {palette_index}", "palette", ""
     return "Base color", "base", ""
+
+
+def color_group_search_text(group: list[ColorEntry]) -> str:
+    return " ".join(
+        " ".join(
+            [
+                entry.emitter_name,
+                entry.section_name,
+                entry.label,
+                entry.type_text,
+                entry.metadata,
+                str(entry.current_value),
+                str(entry.line_number),
+            ]
+        )
+        for entry in group
+    ).lower()
 
 
 def color_metadata(block_text: str) -> str:
@@ -548,6 +560,133 @@ def find_color_entries(text: str) -> list[ColorEntry]:
                 )
             )
     return entries
+
+
+def parse_particle_entries(text: str) -> tuple[list[ColorEntry], list[PropertyEntry]]:
+    color_entries: list[ColorEntry] = []
+    property_entries: list[PropertyEntry] = []
+    effect_match = PARTICLE_EFFECT_RE.search(text)
+    effect_name = effect_match.group(2) if effect_match else ""
+    emitter_contexts = find_emitter_contexts(text)
+    line_starts = line_starts_for_text(text)
+
+    for emitter_index, emitter_match in enumerate(EMITTER_RE.finditer(text), start=1):
+        raw_attrs = emitter_match.group(1)
+        attrs = parse_attrs(raw_attrs)
+        emitter_name = attrs.get("Name", f"Emitter {emitter_index}")
+        for attr_match in ATTR_RE.finditer(raw_attrs):
+            attr_name = attr_match.group(1)
+            if attr_name.lower() != "active":
+                continue
+            value = attr_match.group(3)
+            kind = value_kind(value)
+            if kind != "bool":
+                continue
+            value_start = emitter_match.start(1) + attr_match.start(3)
+            value_end = emitter_match.start(1) + attr_match.end(3)
+            property_entries.append(
+                PropertyEntry(
+                    index=len(property_entries) + 1,
+                    label="Emitter active",
+                    tag_name=attr_name,
+                    category="ParticleEmitter",
+                    emitter_name=emitter_name,
+                    section_name="ParticleEmitter",
+                    line_number=line_number_at(line_starts, value_start),
+                    kind=kind,
+                    original_value=value,
+                    current_value=value,
+                    value_start=value_start,
+                    value_end=value_end,
+                    source="attribute",
+                )
+            )
+
+    for group_id, block_match in enumerate(COLOR_DATA_RE.finditer(text), start=1):
+        block_text = block_match.group(0)
+        block_start = block_match.start()
+        block_tag = block_match.group(1)
+        type_match = TYPE_RE.search(block_text)
+        type_text = type_match.group(1).strip() if type_match else block_tag
+        metadata = color_metadata(block_text)
+        emitter_name, emitter_active, line_number, section_name = context_for_position(
+            text,
+            block_start,
+            emitter_contexts,
+            line_starts,
+        )
+        full_section_name = f"{section_name} / {block_tag}"
+
+        for tag_name in COLOR_PROPERTY_TAGS:
+            match = re.search(
+                rf"<{re.escape(tag_name)}\b[^>]*>([^<>]*)</{re.escape(tag_name)}>",
+                block_text,
+                re.IGNORECASE,
+            )
+            if not match:
+                continue
+            raw_value = match.group(1)
+            value = raw_value.strip()
+            kind = value_kind(value)
+            if kind == "text":
+                continue
+            leading_ws = len(raw_value) - len(raw_value.lstrip())
+            trailing_ws = len(raw_value) - len(raw_value.rstrip())
+            value_start = block_start + match.start(1) + leading_ws
+            value_end = block_start + match.end(1) - trailing_ws
+            property_entries.append(
+                PropertyEntry(
+                    index=len(property_entries) + 1,
+                    label=friendly_label(tag_name),
+                    tag_name=tag_name,
+                    category=block_tag,
+                    emitter_name=emitter_name,
+                    section_name=full_section_name,
+                    line_number=line_number_at(line_starts, value_start),
+                    kind=kind,
+                    original_value=value,
+                    current_value=value,
+                    value_start=value_start,
+                    value_end=value_end,
+                    color_group_id=group_id,
+                )
+            )
+
+        for color_match in COLOR_VALUE_RE.finditer(block_text):
+            raw_value = color_match.group(2)
+            try:
+                original_value = int(raw_value.strip())
+                leading_ws = len(raw_value) - len(raw_value.lstrip())
+                trailing_ws = len(raw_value) - len(raw_value.rstrip())
+                value_start = block_start + color_match.start(2) + leading_ws
+                value_end = block_start + color_match.end(2) - trailing_ws
+            except ValueError:
+                continue
+
+            absolute_position = block_start + color_match.start()
+            label, role, alpha = color_info_for_match(block_text, color_match.start(), color_match.group(1))
+            color_entries.append(
+                ColorEntry(
+                    index=len(color_entries) + 1,
+                    group_id=group_id,
+                    label=label,
+                    role=role,
+                    alpha=alpha,
+                    type_text=type_text,
+                    effect_name=effect_name,
+                    emitter_name=emitter_name,
+                    emitter_active=emitter_active,
+                    section_name=full_section_name,
+                    line_number=line_number_at(line_starts, absolute_position),
+                    metadata=metadata,
+                    original_value=original_value,
+                    value_start=value_start,
+                    value_end=value_end,
+                    current_value=original_value,
+                )
+            )
+
+    return color_entries, property_entries
 
 
 def apply_color_edits(text: str, entries: list[ColorEntry]) -> tuple[str, int]:
@@ -997,6 +1136,9 @@ class ParticleEditor(QMainWindow):
         self.encoding = "utf-8"
         self.original_text = ""
         self.color_entries: list[ColorEntry] = []
+        self.color_groups: list[list[ColorEntry]] = []
+        self.color_group_search: dict[int, str] = {}
+        self.editable_color_count = 0
         self.property_entries: list[PropertyEntry] = []
         self.has_color_edits = False
         self.has_property_edits = False
@@ -1162,8 +1304,13 @@ class ParticleEditor(QMainWindow):
         self.file_path = path
         self.encoding = encoding
         self.original_text = text
-        self.color_entries = find_color_entries(text)
-        self.property_entries = find_quick_property_entries(text)
+        self.color_entries, self.property_entries = parse_particle_entries(text)
+        group_by_id: dict[int, list[ColorEntry]] = {}
+        for entry in self.color_entries:
+            group_by_id.setdefault(entry.group_id, []).append(entry)
+        self.color_groups = list(group_by_id.values())
+        self.color_group_search = {group[0].group_id: color_group_search_text(group) for group in self.color_groups if group}
+        self.editable_color_count = sum(1 for entry in self.color_entries if entry.is_editable)
         self.has_color_edits = False
         self.has_property_edits = False
         self.file_label.setText(os.path.basename(path))
@@ -1183,39 +1330,18 @@ class ParticleEditor(QMainWindow):
             if widget is not None:
                 widget.deleteLater()
 
-        editable_count = 0
         shown_count = 0
         shown_values = 0
         filter_text = self.color_search.text().strip().lower() if hasattr(self, "color_search") else ""
         editable_only = self.editable_only.isChecked() if hasattr(self, "editable_only") else False
         last_emitter = None
 
-        groups: list[list[ColorEntry]] = []
-        group_by_id: dict[int, list[ColorEntry]] = {}
-        for entry in self.color_entries:
-            group_by_id.setdefault(entry.group_id, []).append(entry)
-            editable_count += int(entry.is_editable)
-        groups = list(group_by_id.values())
-
-        for group in groups:
+        for group in self.color_groups:
             visible_group = [entry for entry in group if not editable_only or entry.is_editable]
             if not visible_group:
                 continue
 
-            haystack = " ".join(
-                " ".join(
-                    [
-                        entry.emitter_name,
-                        entry.section_name,
-                        entry.label,
-                        entry.type_text,
-                        entry.metadata,
-                        str(entry.current_value),
-                        str(entry.line_number),
-                    ]
-                )
-                for entry in visible_group
-            ).lower()
+            haystack = self.color_group_search.get(group[0].group_id, "")
             if filter_text and filter_text not in haystack:
                 continue
 
@@ -1237,7 +1363,7 @@ class ParticleEditor(QMainWindow):
             effect = self.color_entries[0].effect_name
             prefix = f"{effect} | " if effect else ""
             summary = QLabel(
-                f"{prefix}showing {shown_count}/{len(groups)} color groups and {shown_values}/{len(self.color_entries)} color values; {editable_count} RGB-int values are editable."
+                f"{prefix}showing {shown_count}/{len(self.color_groups)} color groups and {shown_values}/{len(self.color_entries)} color values; {self.editable_color_count} RGB-int values are editable."
             )
             summary.setObjectName("SubtleLabel")
             self.color_layout.insertWidget(0, summary)
@@ -1245,7 +1371,7 @@ class ParticleEditor(QMainWindow):
         self.color_layout.addStretch(1)
         self.color_container.setUpdatesEnabled(True)
         if hasattr(self, "group_chip"):
-            self.group_chip.setText(f"{shown_count}/{len(groups)} groups")
+            self.group_chip.setText(f"{shown_count}/{len(self.color_groups)} groups")
             self.color_chip.setText(f"{shown_values}/{len(self.color_entries)} colors")
             self.quick_chip.setText(f"{len(self.property_entries)} quick controls")
 

@@ -14,6 +14,7 @@ set "OUTPUT_DIR=%~dp0dist"
 set "ROOT=%~dp0build\pyinstaller"
 set "DIST_DIR=%ROOT%\dist"
 set "LOG=%ROOT%\build.log"
+set "DEPS_STAMP=%ROOT%\deps.ok"
 set "BUILD_PROGRESS=%SCRIPTS%\build_progress.ps1"
 
 if not exist "%ROOT%" mkdir "%ROOT%" >nul 2>nul
@@ -33,12 +34,29 @@ if not exist "%PY%" (
 if errorlevel 1 goto :python_failed
 
 call :progress 2 "Checking dependencies" 0
-"%PY%" -c "import PyInstaller, flet, flet_video, flet_desktop, PySide6" >>"%LOG%" 2>&1
-if errorlevel 1 (
-  call :progress 3 "Installing missing dependencies" 0
-  "%PY%" -m pip install --user pyinstaller flet flet-video flet-desktop PySide6 >>"%LOG%" 2>&1
-  if errorlevel 1 goto :pip_failed
-) else (
+set "CHECK_DEPS=1"
+if exist "%DEPS_STAMP%" (
+  if not "%HW2_FORCE_DEPS%"=="1" (
+    "%PY%" -c "import PyInstaller, flet, flet_video, flet_desktop, PySide6" >>"%LOG%" 2>&1
+    if errorlevel 1 (
+      echo [WARN] Cached dependency stamp is stale; reinstalling dependencies. >>"%LOG%"
+      del "%DEPS_STAMP%" >nul 2>nul
+    ) else (
+      call :progress 3 "Dependencies cached" 0
+      set "CHECK_DEPS=0"
+    )
+  )
+)
+if "%CHECK_DEPS%"=="1" (
+  "%PY%" -c "import PyInstaller, flet, flet_video, flet_desktop, PySide6" >>"%LOG%" 2>&1
+  if errorlevel 1 (
+    call :progress 3 "Installing missing dependencies" 0
+    "%PY%" -m pip install --user --disable-pip-version-check pyinstaller flet flet-video flet-desktop PySide6 >>"%LOG%" 2>&1
+    if errorlevel 1 goto :pip_failed
+    "%PY%" -c "import PyInstaller, flet, flet_video, flet_desktop, PySide6" >>"%LOG%" 2>&1
+    if errorlevel 1 goto :pip_failed
+  )
+  type nul > "%DEPS_STAMP%"
   call :progress 3 "Dependencies ready" 0
 )
 
@@ -52,6 +70,8 @@ set "LIB=%SRC%\Modules\Library"
 set "TOOLS_DIR=%PROJ%tools"
 set "MODULES_DIR=%SRC%\Modules"
 set "PFX_EDITOR=%SRC%\pfx_editor_pyside.py"
+set "RUST_PACKAGER_SRC=%PROJ%src-rust\HW2Packager"
+set "RUST_PACKAGER_EXE=%TOOLS_DIR%\HW2Packager\hw2pkg.exe"
 
 if not exist "%BG%" (
   echo [ERROR] Missing: %BG%
@@ -82,13 +102,41 @@ if not exist "%PFX_EDITOR%" (
   pause
   exit /b 1
 )
+if not exist "%RUST_PACKAGER_SRC%\Cargo.toml" (
+  echo [ERROR] Missing: %RUST_PACKAGER_SRC%\Cargo.toml
+  pause
+  exit /b 1
+)
 if not exist "%BUILD_PROGRESS%" (
   echo [ERROR] Missing: %BUILD_PROGRESS%
   pause
   exit /b 1
 )
 
-call :progress 5 "Building executable" 1
+call :progress 5 "Building fast PKG packager" 0
+where cargo >nul 2>nul
+if errorlevel 1 (
+  if not exist "%RUST_PACKAGER_EXE%" (
+    echo [ERROR] Cargo is not installed and no existing fast packager was found:
+    echo   %RUST_PACKAGER_EXE%
+    pause
+    exit /b 1
+  )
+  echo [WARN] Cargo not found; using existing fast packager.
+) else (
+  pushd "%RUST_PACKAGER_SRC%"
+  cargo build --release >>"%LOG%" 2>&1
+  if errorlevel 1 (
+    popd
+    goto :rust_failed
+  )
+  popd
+  if not exist "%TOOLS_DIR%\HW2Packager" mkdir "%TOOLS_DIR%\HW2Packager" >nul 2>nul
+  copy /y "%RUST_PACKAGER_SRC%\target\release\hw2pkg.exe" "%RUST_PACKAGER_EXE%" >>"%LOG%" 2>&1
+  if errorlevel 1 goto :rust_failed
+)
+
+call :progress 6 "Building executable" 1
 if defined MP4 (
   set "INCLUDE_INTRO=-IncludeIntro"
 ) else (
@@ -97,11 +145,16 @@ if defined MP4 (
 powershell -NoProfile -ExecutionPolicy Bypass -File "%BUILD_PROGRESS%" -Python "%PY%" -Project "%PROJ_ARG%" -BuildRoot "%ROOT%" %INCLUDE_INTRO%
 if errorlevel 1 goto :build_failed
 
-call :progress 6 "Copying final exe" 0
-copy /y "%DIST_DIR%\Halo Wars 2 Modding Suite.exe" "%OUTPUT_DIR%\Halo Wars 2 Modding Suite.exe" >>"%LOG%" 2>&1
+call :progress 7 "Publishing final exe" 0
+robocopy "%DIST_DIR%" "%OUTPUT_DIR%" "Halo Wars 2 Modding Suite.exe" /XO /NFL /NDL /NJH /NJS /NP >>"%LOG%" 2>&1
+if %ERRORLEVEL% LEQ 3 (
+  verify >nul
+) else (
+  goto :copy_failed
+)
 if errorlevel 1 goto :copy_failed
 
-call :progress 7 "Done" 0
+call :progress 8 "Done" 0
 echo.
 echo [OK] Built: "%OUTPUT_DIR%\Halo Wars 2 Modding Suite.exe"
 echo [OK] Build cache kept for faster future builds: "%ROOT%"
@@ -117,7 +170,8 @@ if "%~1"=="3" set "BAR=[############..................]"
 if "%~1"=="4" set "BAR=[################..............]"
 if "%~1"=="5" set "BAR=[####################..........]"
 if "%~1"=="6" set "BAR=[##########################....]"
-if "%~1"=="7" set "BAR=[##############################]"
+if "%~1"=="7" set "BAR=[############################....]"
+if "%~1"=="8" set "BAR=[##############################]"
 if "%~3"=="1" (
   echo %BAR% %~2
 ) else (
@@ -135,6 +189,10 @@ goto :show_log
 
 :build_failed
 echo [ERROR] Build failed.
+goto :show_log
+
+:rust_failed
+echo [ERROR] Fast PKG packager build failed.
 goto :show_log
 
 :copy_failed

@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+from functools import lru_cache
 
 def resource_path(relative_path):
     """
@@ -12,10 +13,11 @@ def resource_path(relative_path):
         base_path = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(base_path, relative_path)
 
+@lru_cache(maxsize=None)
 def load_library(filename: str):
     """
     Automatically prepends the folder and resolves the EXE path
     """
     path = resource_path(filename)
-    with open(path, "r") as f:
+    with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
