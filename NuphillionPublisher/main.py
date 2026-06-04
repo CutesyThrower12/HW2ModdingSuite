@@ -131,7 +131,6 @@ def main(page: ft.Page) -> None:
 
     header = ft.Container(
         bgcolor="#121922",
-        border=ft.border.all(1, BORDER),
         padding=ft.padding.symmetric(horizontal=22, vertical=16),
         content=ft.Row(
             [
@@ -151,7 +150,6 @@ def main(page: ft.Page) -> None:
 
     settings = ft.Container(
         bgcolor=CARD_BG,
-        border=ft.border.all(1, BORDER),
         border_radius=8,
         padding=18,
         content=ft.Column(
@@ -172,7 +170,6 @@ def main(page: ft.Page) -> None:
 
     log_panel = ft.Container(
         bgcolor=CARD_BG,
-        border=ft.border.all(1, BORDER),
         border_radius=8,
         padding=18,
         content=ft.Column(
