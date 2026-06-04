@@ -131,7 +131,7 @@ def main(page: ft.Page) -> None:
 
     header = ft.Container(
         bgcolor="#121922",
-        border=ft.border.only(bottom=ft.BorderSide(1, BORDER)),
+        border=ft.border.all(1, BORDER),
         padding=ft.padding.symmetric(horizontal=22, vertical=16),
         content=ft.Row(
             [
