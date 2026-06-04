@@ -1292,7 +1292,10 @@ def main(page: Page):
                 compile_progress_label = Text("Idle", size=12)
                 launch_after_checkbox = Checkbox(label="Launch Halo Wars 2 after compile", value=False)
                 include_loose_xml_checkbox = Checkbox(label="Include loose editable .xml files in package", value=False)
+                launcher_repo_field = TextField(label="Nuphillion Launcher repo", value=r"C:\Users\Admin\Downloads\Git\NuphillionDev", width=700, bgcolor=INPUT_BG)
+                rebuild_expansion_checkbox = Checkbox(label="Rebuild nuphillionExpansion.zip from loose video folder", value=True)
                 ancilla_output = TextField(label="Ancilla Output", multiline=True, min_lines=8, max_lines=20, width=900, bgcolor=OUTPUT_BG)
+                publish_output = TextField(label="Publish Output", multiline=True, min_lines=5, max_lines=12, width=900, bgcolor=OUTPUT_BG)
 
                 def package_directory_to_pkg(src_dir, dest_pkg, progress_callback=None, include_loose_xml=False):
                     try:
@@ -1579,15 +1582,65 @@ def main(page: Page):
 
                 compile_btn = Button("Compile Mod", on_click=compile_btn_clicked)
 
+                async def publish_mod(e=None):
+                    publish_output.value = ""
+                    compile_progress_label.value = "Publishing to Nuphillion Launcher..."
+                    compile_progress_bar.value = 0
+                    page.update()
+
+                    try:
+                        from Modules.nuphillion_publisher import publish_to_nuphillion_launcher
+
+                        dir_path = pkg_file_field.value.strip()
+                        compiled_source_dir = dir_path if os.path.isdir(dir_path) else None
+                        launcher_repo = launcher_repo_field.value.strip() or r"C:\Users\Admin\Downloads\Git\NuphillionDev"
+
+                        loop = asyncio.get_running_loop()
+                        result = await loop.run_in_executor(
+                            None,
+                            lambda: publish_to_nuphillion_launcher(
+                                launcher_repo=launcher_repo,
+                                gts_dir=os.path.expandvars(GTS_PATH_TEMPLATE),
+                                compiled_source_dir=compiled_source_dir,
+                                rebuild_expansion=bool(rebuild_expansion_checkbox.value),
+                            ),
+                        )
+                        publish_output.value = "\n".join(result.messages)
+                        compile_progress_label.value = "Publish completed"
+                        compile_progress_bar.value = 1
+                        page.snack_bar = SnackBar(Text("Published launcher ZIP assets."), open=True)
+                    except Exception as ex:
+                        publish_output.value = f"Publish failed: {ex}"
+                        compile_progress_label.value = "Publish failed"
+                        page.snack_bar = SnackBar(Text(f"Publish failed: {ex}"), open=True)
+                    page.update()
+
+                def publish_btn_clicked(e=None):
+                    try:
+                        loop = asyncio.get_running_loop()
+                    except RuntimeError:
+                        loop = None
+                    if loop and loop.is_running():
+                        loop.create_task(publish_mod(e))
+                    else:
+                        asyncio.run(publish_mod(e))
+
+                publish_btn = Button("Publish Mod", on_click=publish_btn_clicked)
+
                 build_tab = Column([
                     Text("Compile Mod Builder", size=20, weight="bold"),
                     Row([pkg_file_field, pkg_browse_btn], alignment="center"),
                     Row([compile_btn, launch_after_checkbox, include_loose_xml_checkbox], spacing=12),
                     Divider(),
+                    Text("Nuphillion Launcher Publish", size=16, weight="bold"),
+                    Row([launcher_repo_field, publish_btn], spacing=12),
+                    Row([rebuild_expansion_checkbox], spacing=12),
+                    Divider(),
                     compile_progress_label,
                     compile_progress_bar,
                     Divider(),
                     ancilla_output,
+                    publish_output,
                 ], alignment="start", horizontal_alignment="start", spacing=8)
 
                 layout = Row([
