@@ -7,6 +7,7 @@ import time
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 from xml.etree import ElementTree
 
 
@@ -35,6 +36,15 @@ class PublishResult:
     messages: list[str]
     changed_files: list[str]
     commit_hash: str | None = None
+
+
+ProgressCallback = Callable[[str], None] | None
+
+
+def _emit(messages: list[str], text: str, progress: ProgressCallback = None) -> None:
+    messages.append(text)
+    if progress:
+        progress(text)
 
 
 def default_gts_dir() -> Path:
@@ -82,15 +92,19 @@ def _write_zip_entry_from_file(zip_file: zipfile.ZipFile, source: Path, arcname:
         zip_file.writestr(info, handle.read())
 
 
-def build_modded_patch_zip(manifest_path: Path, pkg_path: Path, output_zip: Path) -> None:
+def build_modded_patch_zip(manifest_path: Path, pkg_path: Path, output_zip: Path, progress: ProgressCallback = None) -> None:
     output_zip.parent.mkdir(parents=True, exist_ok=True)
+    if progress:
+        progress("Preparing launcher manifest...")
     manifest_bytes = _rewrite_manifest_for_launcher(manifest_path, pkg_path)
     with zipfile.ZipFile(output_zip, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
         archive.writestr(MANIFEST_NAME, manifest_bytes)
+        if progress:
+            progress(f"Compressing {LAUNCHER_PKG_NAME}...")
         _write_zip_entry_from_file(archive, pkg_path, LAUNCHER_PKG_NAME)
 
 
-def build_expansion_zip(source_dir: Path, output_zip: Path) -> None:
+def build_expansion_zip(source_dir: Path, output_zip: Path, progress: ProgressCallback = None) -> None:
     if not source_dir.is_dir():
         raise FileNotFoundError(f"Expansion source folder does not exist: {source_dir}")
 
@@ -100,23 +114,30 @@ def build_expansion_zip(source_dir: Path, output_zip: Path) -> None:
 
     output_zip.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(output_zip, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
-        for path in sorted(files, key=lambda item: str(item.relative_to(source_dir)).lower()):
+        sorted_files = sorted(files, key=lambda item: str(item.relative_to(source_dir)).lower())
+        total = len(sorted_files)
+        for index, path in enumerate(sorted_files, start=1):
+            if progress:
+                rel = str(path.relative_to(source_dir)).replace("\\", "/")
+                progress(f"Compressing expansion file {index}/{total}: {rel}")
             _write_zip_entry_from_file(archive, path, str(path.relative_to(source_dir)))
 
 
-def _run_git(repo: Path, args: list[str], messages: list[str], check: bool = True) -> subprocess.CompletedProcess:
+def _run_git(repo: Path, args: list[str], messages: list[str], check: bool = True, progress: ProgressCallback = None) -> subprocess.CompletedProcess:
     command = ["git", *args]
+    if progress:
+        progress(f"Running: git {' '.join(args)}")
     completed = subprocess.run(command, cwd=repo, text=True, capture_output=True)
     detail = (completed.stdout + completed.stderr).strip()
     if detail:
-        messages.append(detail)
+        _emit(messages, detail, progress)
     if check and completed.returncode != 0:
         raise RuntimeError(f"git {' '.join(args)} failed with exit code {completed.returncode}")
     return completed
 
 
-def _current_branch(repo: Path, messages: list[str]) -> str:
-    completed = _run_git(repo, ["branch", "--show-current"], messages)
+def _current_branch(repo: Path, messages: list[str], progress: ProgressCallback = None) -> str:
+    completed = _run_git(repo, ["branch", "--show-current"], messages, progress=progress)
     branch = completed.stdout.strip()
     if not branch:
         raise RuntimeError("Launcher repo is in detached HEAD state; cannot push automatically.")
@@ -134,8 +155,8 @@ def _git_changed_assets(repo: Path) -> list[str]:
     return [line[3:].strip() for line in completed.stdout.splitlines() if line.strip()]
 
 
-def ensure_git_lfs(repo: Path, messages: list[str]) -> None:
-    _run_git(repo, ["lfs", "install", "--local"], messages)
+def ensure_git_lfs(repo: Path, messages: list[str], progress: ProgressCallback = None) -> None:
+    _run_git(repo, ["lfs", "install", "--local"], messages, progress=progress)
     attributes = repo / ".gitattributes"
     wanted = "*.zip filter=lfs diff=lfs merge=lfs -text"
     existing = attributes.read_text(encoding="utf-8") if attributes.exists() else ""
@@ -144,71 +165,71 @@ def ensure_git_lfs(repo: Path, messages: list[str]) -> None:
             if existing and not existing.endswith("\n"):
                 handle.write("\n")
             handle.write(wanted + "\n")
-        messages.append("Updated .gitattributes so ZIP assets use Git LFS.")
+        _emit(messages, "Updated .gitattributes so ZIP assets use Git LFS.", progress)
     else:
-        messages.append("Git LFS tracking for ZIP assets is already configured.")
+        _emit(messages, "Git LFS tracking for ZIP assets is already configured.", progress)
 
 
-def commit_and_push(repo: Path, options: PublishOptions, messages: list[str]) -> tuple[list[str], str | None]:
+def commit_and_push(repo: Path, options: PublishOptions, messages: list[str], progress: ProgressCallback = None) -> tuple[list[str], str | None]:
     changed = _git_changed_assets(repo)
     if not changed:
-        messages.append("No launcher asset changes detected; commit skipped.")
+        _emit(messages, "No launcher asset changes detected; commit skipped.", progress)
         return [], None
 
     stage_paths = ["Assets/moddedPatch.zip", "Assets/nuphillionExpansion.zip"]
     if (repo / ".gitattributes").exists():
         stage_paths.insert(0, ".gitattributes")
-    _run_git(repo, ["add", *stage_paths], messages)
-    _run_git(repo, ["commit", "-m", options.commit_message], messages)
-    commit_hash = _run_git(repo, ["rev-parse", "--short", "HEAD"], messages).stdout.strip()
-    messages.append(f"Committed launcher asset update: {commit_hash}")
+    _run_git(repo, ["add", *stage_paths], messages, progress=progress)
+    _run_git(repo, ["commit", "-m", options.commit_message], messages, progress=progress)
+    commit_hash = _run_git(repo, ["rev-parse", "--short", "HEAD"], messages, progress=progress).stdout.strip()
+    _emit(messages, f"Committed launcher asset update: {commit_hash}", progress)
 
     if options.push_changes:
-        branch = _current_branch(repo, messages)
-        _run_git(repo, ["lfs", "push", "origin", branch], messages)
-        _run_git(repo, ["push", "origin", branch], messages)
-        messages.append(f"Pushed launcher repo to origin/{branch}.")
+        branch = _current_branch(repo, messages, progress)
+        _run_git(repo, ["lfs", "push", "origin", branch], messages, progress=progress)
+        _run_git(repo, ["push", "origin", branch], messages, progress=progress)
+        _emit(messages, f"Pushed launcher repo to origin/{branch}.", progress)
     else:
-        messages.append("Push skipped by toggle.")
+        _emit(messages, "Push skipped by toggle.", progress)
 
     return changed, commit_hash
 
 
-def publish(options: PublishOptions) -> PublishResult:
+def publish(options: PublishOptions, progress: ProgressCallback = None) -> PublishResult:
     repo = options.launcher_repo
     assets = repo / "Assets"
     if not assets.is_dir():
         raise FileNotFoundError(f"Launcher Assets folder does not exist: {assets}")
 
     messages: list[str] = []
-    messages.append(f"Launcher repo: {repo}")
+    _emit(messages, f"Launcher repo: {repo}", progress)
 
     if options.ensure_lfs:
-        ensure_git_lfs(repo, messages)
+        ensure_git_lfs(repo, messages, progress)
     else:
-        messages.append("Git LFS setup skipped by toggle.")
+        _emit(messages, "Git LFS setup skipped by toggle.", progress)
 
     if options.refresh_modded_patch:
         manifest, pkg = find_latest_compiled_output(options.gts_dir)
-        messages.append(f"Using manifest: {manifest}")
-        messages.append(f"Using package: {pkg}")
-        build_modded_patch_zip(manifest, pkg, assets / "moddedPatch.zip")
-        messages.append("Refreshed Assets/moddedPatch.zip.")
+        _emit(messages, f"Using manifest: {manifest}", progress)
+        _emit(messages, f"Using package: {pkg}", progress)
+        build_modded_patch_zip(manifest, pkg, assets / "moddedPatch.zip", progress)
+        _emit(messages, "Refreshed Assets/moddedPatch.zip.", progress)
     else:
-        messages.append("Skipped moddedPatch.zip by toggle.")
+        _emit(messages, "Skipped moddedPatch.zip by toggle.", progress)
 
     if options.refresh_expansion:
-        build_expansion_zip(options.expansion_source, assets / "nuphillionExpansion.zip")
-        messages.append(f"Refreshed Assets/nuphillionExpansion.zip from {options.expansion_source}.")
+        build_expansion_zip(options.expansion_source, assets / "nuphillionExpansion.zip", progress)
+        _emit(messages, f"Refreshed Assets/nuphillionExpansion.zip from {options.expansion_source}.", progress)
     else:
-        messages.append("Skipped nuphillionExpansion.zip by toggle.")
+        _emit(messages, "Skipped nuphillionExpansion.zip by toggle.", progress)
 
     changed_files: list[str] = []
     commit_hash = None
     if options.commit_changes:
-        changed_files, commit_hash = commit_and_push(repo, options, messages)
+        changed_files, commit_hash = commit_and_push(repo, options, messages, progress)
     else:
         changed_files = _git_changed_assets(repo)
-        messages.append("Commit skipped by toggle.")
+        _emit(messages, "Commit skipped by toggle.", progress)
 
     return PublishResult(messages=messages, changed_files=changed_files, commit_hash=commit_hash)

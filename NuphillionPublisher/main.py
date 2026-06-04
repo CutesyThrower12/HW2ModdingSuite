@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import queue
 from pathlib import Path
 
 import flet as ft
@@ -30,9 +31,9 @@ BORDER = "#263445"
 
 def main(page: ft.Page) -> None:
     page.title = "Nuphillion Publisher"
-    page.window_width = 1020
-    page.window_height = 760
-    page.window_min_width = 900
+    page.window_width = 1220
+    page.window_height = 820
+    page.window_min_width = 1040
     page.window_min_height = 640
     page.theme_mode = "dark"
     page.bgcolor = "#090d12"
@@ -54,17 +55,19 @@ def main(page: ft.Page) -> None:
     output = ft.TextField(
         label="Publish log",
         multiline=True,
-        min_lines=14,
-        max_lines=18,
+        min_lines=18,
+        max_lines=24,
         value="",
         bgcolor=OUTPUT_BG,
         border_color=BORDER,
         text_size=12,
         read_only=True,
+        expand=True,
     )
 
     def pick_folder(target: ft.TextField, title: str) -> None:
-        picker = ft.FilePicker(on_result=lambda e: set_folder(target, e.path))
+        picker = ft.FilePicker()
+        picker.on_result = lambda e: set_folder(target, e.path)
         page.overlay.append(picker)
         page.update()
         picker.get_directory_path(dialog_title=title)
@@ -77,6 +80,18 @@ def main(page: ft.Page) -> None:
     def log_line(text: str) -> None:
         output.value = (output.value + "\n" + text).strip()
         page.update()
+
+    def drain_log(log_queue: queue.Queue[str]) -> None:
+        changed = False
+        while True:
+            try:
+                line = log_queue.get_nowait()
+            except queue.Empty:
+                break
+            output.value = (output.value + "\n" + line).strip()
+            changed = True
+        if changed:
+            page.update()
 
     async def run_publish(_=None) -> None:
         output.value = ""
@@ -96,14 +111,21 @@ def main(page: ft.Page) -> None:
             commit_message=commit_message.value.strip() or "Publish Nuphillion mod assets",
         )
 
+        log_queue: queue.Queue[str] = queue.Queue()
+
         try:
             loop = asyncio.get_running_loop()
-            result = await loop.run_in_executor(None, lambda: publish(options))
-            output.value = "\n\n".join(result.messages)
+            future = loop.run_in_executor(None, lambda: publish(options, progress=log_queue.put))
+            while not future.done():
+                drain_log(log_queue)
+                await asyncio.sleep(0.12)
+            result = await future
+            drain_log(log_queue)
             status.value = "Publish complete"
             progress.value = 1
             page.snack_bar = ft.SnackBar(ft.Text("Nuphillion publish completed."), open=True)
         except Exception as exc:
+            drain_log(log_queue)
             status.value = "Publish failed"
             progress.value = 0
             log_line(f"ERROR: {exc}")
