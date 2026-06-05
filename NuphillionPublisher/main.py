@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import queue
+import sys
 from pathlib import Path
 
 import flet as ft
@@ -28,9 +30,29 @@ CARD_BG = "#151822"
 INPUT_BG = "#1a1a1a"
 OUTPUT_BG = "#0b0f14"
 BORDER = "#263445"
+APP_USER_MODEL_ID = "CutesyThrower12.NuphillionPublisher"
+
+
+def set_windows_app_id() -> None:
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)
+    except Exception:
+        pass
+
+
+def set_private_flet_view_path() -> None:
+    base_dir = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).parent
+    flet_view = base_dir / "flet_view"
+    if (flet_view / "flet.exe").is_file():
+        os.environ["FLET_VIEW_PATH"] = str(flet_view)
 
 
 def main(page: ft.Page) -> None:
+    set_windows_app_id()
     page.title = "Nuphillion Publisher"
     page.window_width = 1220
     page.window_height = 820
@@ -243,4 +265,6 @@ def main(page: ft.Page) -> None:
 
 
 if __name__ == "__main__":
+    set_windows_app_id()
+    set_private_flet_view_path()
     ft.app(target=main)

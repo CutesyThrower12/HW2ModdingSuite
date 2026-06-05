@@ -9,14 +9,15 @@ set "ROOT=%~dp0build"
 set "DIST=%~dp0dist"
 set "BUILD_DIST=%ROOT%\dist"
 set "LOG=%ROOT%\build.log"
-set "ICON=%~dp0..\assets\iconNuph.ico"
+set "ICON=%~dp0icon.ico"
+set "VERSION_FILE=%~dp0version_info.txt"
 
 if not exist "%ROOT%" mkdir "%ROOT%" >nul 2>nul
 if not exist "%DIST%" mkdir "%DIST%" >nul 2>nul
 if not exist "%BUILD_DIST%" mkdir "%BUILD_DIST%" >nul 2>nul
 type nul > "%LOG%"
 
-echo [1/5] Checking Python
+echo [1/6] Checking Python
 if not exist "%PY%" (
   echo [ERROR] Python not found: %PY%
   pause
@@ -25,24 +26,31 @@ if not exist "%PY%" (
 "%PY%" --version >>"%LOG%" 2>&1
 if errorlevel 1 goto :failed
 
-echo [2/5] Checking dependencies
+echo [2/6] Checking dependencies
 "%PY%" -c "import PyInstaller, flet" >>"%LOG%" 2>&1
 if errorlevel 1 (
   "%PY%" -m pip install --user --disable-pip-version-check pyinstaller flet flet-desktop >>"%LOG%" 2>&1
   if errorlevel 1 goto :failed
 )
 
-echo [3/5] Closing old Publisher if it is running
+echo [3/6] Closing old Publisher if it is running
 taskkill /IM "%APP%.exe" /F >>"%LOG%" 2>&1
+taskkill /IM "flet.exe" /F >>"%LOG%" 2>&1
 timeout /t 1 /nobreak >nul
 
-echo [4/5] Building executable
+echo [4/6] Building executable
 set "ICON_ARG="
 if exist "%ICON%" set "ICON_ARG=--icon=%ICON%"
-"%PY%" -m PyInstaller --noconfirm --clean --windowed --name "%APP%" %ICON_ARG% --distpath "%BUILD_DIST%" --workpath "%ROOT%\pyinstaller" --specpath "%ROOT%" "%~dp0main.py" >>"%LOG%" 2>&1
+set "VERSION_ARG="
+if exist "%VERSION_FILE%" set "VERSION_ARG=--version-file=%VERSION_FILE%"
+"%PY%" -m PyInstaller --noconfirm --clean --windowed --name "%APP%" %ICON_ARG% %VERSION_ARG% --distpath "%BUILD_DIST%" --workpath "%ROOT%\pyinstaller" --specpath "%ROOT%" "%~dp0main.py" >>"%LOG%" 2>&1
 if errorlevel 1 goto :failed
 
-echo [5/5] Publishing final build
+echo [5/6] Stamping private Flet client
+"%PY%" "%~dp0stamp_flet_client.py" "%BUILD_DIST%\%APP%\flet_view" "%ICON%" "%VERSION_FILE%" >>"%LOG%" 2>&1
+if errorlevel 1 goto :failed
+
+echo [6/6] Publishing final build
 if exist "%DIST%\%APP%" rmdir /s /q "%DIST%\%APP%" >>"%LOG%" 2>&1
 if exist "%DIST%\%APP%.exe" del /f /q "%DIST%\%APP%.exe" >>"%LOG%" 2>&1
 robocopy "%BUILD_DIST%" "%DIST%" /MIR /NFL /NDL /NJH /NJS /NP >>"%LOG%" 2>&1
