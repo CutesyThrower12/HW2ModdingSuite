@@ -9,6 +9,7 @@ import flet as ft
 from publisher_core import (
     DEFAULT_EXPANSION_SOURCE,
     DEFAULT_LAUNCHER_REPO,
+    DEFAULT_RELEASE_DOWNLOAD_DIR,
     PublishOptions,
     default_gts_dir,
     publish,
@@ -42,10 +43,14 @@ def main(page: ft.Page) -> None:
     launcher_repo = ft.TextField(label="Nuphillion Launcher repo", value=str(DEFAULT_LAUNCHER_REPO), bgcolor=INPUT_BG, expand=True)
     gts_dir = ft.TextField(label="Compiled GTS output", value=str(default_gts_dir()), bgcolor=INPUT_BG, expand=True)
     expansion_source = ft.TextField(label="Loose expansion source", value=str(DEFAULT_EXPANSION_SOURCE), bgcolor=INPUT_BG, expand=True)
+    release_download_dir = ft.TextField(label="Release ZIP download folder", value=str(DEFAULT_RELEASE_DOWNLOAD_DIR), bgcolor=INPUT_BG, expand=True)
     commit_message = ft.TextField(label="Commit message", value="Publish Nuphillion mod assets", bgcolor=INPUT_BG, expand=True)
 
     refresh_patch = ft.Checkbox(label="Refresh moddedPatch.zip", value=True)
     refresh_expansion = ft.Checkbox(label="Refresh nuphillionExpansion.zip", value=False)
+    initialize_release = ft.Checkbox(label="Initialize/update Release workflow", value=False)
+    run_release = ft.Checkbox(label="Run GitHub Release workflow", value=False)
+    download_release = ft.Checkbox(label="Download release ZIP after workflow", value=False)
     ensure_lfs = ft.Checkbox(label="Ensure Git LFS", value=True)
     commit_changes = ft.Checkbox(label="Commit launcher changes", value=True)
     push_changes = ft.Checkbox(label="Push to GitHub", value=False)
@@ -118,6 +123,10 @@ def main(page: ft.Page) -> None:
             commit_changes=bool(commit_changes.value),
             push_changes=bool(push_changes.value),
             commit_message=commit_message.value.strip() or "Publish Nuphillion mod assets",
+            initialize_release_workflow=bool(initialize_release.value),
+            run_release_workflow=bool(run_release.value),
+            download_release_zip=bool(download_release.value),
+            release_download_dir=Path(release_download_dir.value.strip()),
         )
 
         log_queue: queue.Queue[str] = queue.Queue()
@@ -189,10 +198,14 @@ def main(page: ft.Page) -> None:
                 folder_row(launcher_repo, "Select NuphillionDev repo"),
                 folder_row(gts_dir, "Select compiled GTS output folder"),
                 folder_row(expansion_source, "Select loose expansion source folder"),
+                folder_row(release_download_dir, "Select release ZIP download folder"),
                 ft.Divider(height=18, color=BORDER),
                 ft.Text("Publish Toggles", size=16, weight="bold", color=TEAL),
                 ft.Row([refresh_patch, refresh_expansion], spacing=24),
                 ft.Row([ensure_lfs, commit_changes, push_changes], spacing=24),
+                ft.Divider(height=18, color=BORDER),
+                ft.Text("Release Automation", size=16, weight="bold", color=TEAL),
+                ft.Row([initialize_release, run_release, download_release], spacing=24),
                 commit_message,
             ],
             spacing=10,

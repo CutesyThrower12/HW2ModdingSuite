@@ -11,6 +11,8 @@ Nuphillion Launcher Alpha asset ZIPs.
   folder.
 - Ensures launcher ZIPs are tracked through Git LFS.
 - Optionally commits and pushes the launcher repo after publishing.
+- Optionally initializes the NuphillionDev `Release` GitHub Actions workflow.
+- Optionally runs the release workflow and downloads `NuphillionManager-*.zip`.
 
 ## Defaults
 
@@ -31,5 +33,25 @@ build.bat
 The executable is written to:
 
 ```text
-dist\Nuphillion Publisher.exe
+dist\Nuphillion Publisher\Nuphillion Publisher.exe
 ```
+
+## Release Automation
+
+Release workflow actions use the GitHub CLI:
+
+```powershell
+gh auth login
+```
+
+Enable these toggles in the app as needed:
+
+- `Initialize/update Release workflow` writes the optimized `ci.yml` and
+  `release.yml` files into the launcher repo.
+- `Run GitHub Release workflow` queues `release.yml`, waits for the run to
+  finish, and reports progress in the log.
+- `Download release ZIP after workflow` downloads the newest
+  `NuphillionManager-*.zip` release asset to the selected folder.
+
+If you publish new launcher assets and want the release to contain them, keep
+`Push to GitHub` enabled before running the release workflow.
