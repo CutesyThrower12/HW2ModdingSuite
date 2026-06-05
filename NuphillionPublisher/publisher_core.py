@@ -26,6 +26,9 @@ GH_CANDIDATES = [
 ]
 CI_WORKFLOW = """name: CI
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 on:
   push:
     branches: [main]
@@ -55,12 +58,15 @@ jobs:
           cache-dependency-path: "**/*.csproj"
 
       - name: Restore dependencies
-        run: dotnet restore NuphillionManager.sln --locked-mode false
+        run: dotnet restore NuphillionManager.sln
 
       - name: Build
         run: dotnet build NuphillionManager.sln -c Release --no-restore
 """
 RELEASE_WORKFLOW = """name: Release
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 on:
   workflow_dispatch:
@@ -129,7 +135,7 @@ jobs:
           cache-dependency-path: "**/*.csproj"
 
       - name: Restore dependencies
-        run: dotnet restore NuphillionManager.sln --locked-mode false
+        run: dotnet restore NuphillionManager.sln
 
       - name: Build
         run: dotnet build NuphillionManager/NuphillionManager.csproj -c Release -r win-x64 --self-contained true --no-restore
