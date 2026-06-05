@@ -66,11 +66,20 @@ def main(page: ft.Page) -> None:
     )
 
     def pick_folder(target: ft.TextField, title: str) -> None:
-        picker = ft.FilePicker()
-        picker.on_result = lambda e: set_folder(target, e.path)
-        page.overlay.append(picker)
-        page.update()
-        picker.get_directory_path(dialog_title=title)
+        try:
+            from tkinter import Tk, filedialog
+
+            root = Tk()
+            root.withdraw()
+            root.attributes("-topmost", True)
+            start_dir = target.value if target.value and Path(target.value).exists() else str(Path.home())
+            path = filedialog.askdirectory(title=title, initialdir=start_dir)
+            root.destroy()
+            set_folder(target, path)
+        except Exception as exc:
+            log_line(f"Browse failed: {exc}")
+            page.snack_bar = ft.SnackBar(ft.Text(f"Browse failed: {exc}"), open=True)
+            page.update()
 
     def set_folder(target: ft.TextField, path: str | None) -> None:
         if path:
