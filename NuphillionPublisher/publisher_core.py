@@ -18,6 +18,12 @@ DEFAULT_RELEASE_DOWNLOAD_DIR = Path.home() / "Downloads" / "NuphillionReleases"
 GTS_RELATIVE = Path("Packages") / "Microsoft.HoganThreshold_8wekyb3d8bbwe" / "LocalState" / "GTS" / "1_11_2931_2_active"
 MANIFEST_NAME = "1_11_2931_2_file_manifest.xml"
 LAUNCHER_PKG_NAME = "nuphillionCode.pkg"
+GH_CANDIDATES = [
+    Path(r"C:\Program Files\GitHub CLI\gh.exe"),
+    Path(r"C:\Program Files (x86)\GitHub CLI\gh.exe"),
+    Path(os.environ.get("LOCALAPPDATA", "")) / "GitHub CLI" / "gh.exe",
+    Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "GitHub CLI" / "gh.exe",
+]
 CI_WORKFLOW = """name: CI
 
 on:
@@ -277,6 +283,7 @@ def _run_command(
     check: bool = True,
     progress: ProgressCallback = None,
 ) -> subprocess.CompletedProcess:
+    command = _resolve_command(command)
     if progress:
         progress(f"Running: {' '.join(command)}")
     try:
@@ -291,6 +298,17 @@ def _run_command(
     if check and completed.returncode != 0:
         raise RuntimeError(f"{' '.join(command)} failed with exit code {completed.returncode}")
     return completed
+
+
+def _resolve_command(command: list[str]) -> list[str]:
+    if not command:
+        return command
+    if command[0].lower() != "gh":
+        return command
+    for candidate in GH_CANDIDATES:
+        if candidate.is_file():
+            return [str(candidate), *command[1:]]
+    return command
 
 
 def _run_git(repo: Path, args: list[str], messages: list[str], check: bool = True, progress: ProgressCallback = None) -> subprocess.CompletedProcess:
@@ -351,6 +369,10 @@ def initialize_release_files(repo: Path, messages: list[str], progress: Progress
 
 def _ensure_gh(repo: Path, messages: list[str], progress: ProgressCallback = None) -> None:
     _run_command(repo, ["gh", "--version"], messages, progress=progress)
+    try:
+        _run_command(repo, ["gh", "auth", "status"], messages, progress=progress)
+    except RuntimeError as exc:
+        raise RuntimeError("GitHub CLI is installed, but it is not authenticated. Run 'gh auth login' and try again.") from exc
 
 
 def run_release_workflow(repo: Path, messages: list[str], progress: ProgressCallback = None) -> int:
@@ -365,7 +387,7 @@ def run_release_workflow(repo: Path, messages: list[str], progress: ProgressCall
     for _ in range(24):
         time.sleep(5)
         completed = subprocess.run(
-            ["gh", "run", "list", "--repo", slug, "--workflow", "release.yml", "--branch", branch, "--limit", "5", "--json", "databaseId,createdAt,status"],
+            _resolve_command(["gh", "run", "list", "--repo", slug, "--workflow", "release.yml", "--branch", branch, "--limit", "5", "--json", "databaseId,createdAt,status"]),
             cwd=repo,
             text=True,
             capture_output=True,
