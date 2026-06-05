@@ -185,6 +185,9 @@ def centered_window_position(width: int, height: int) -> tuple[int, int] | None:
 if "--particle-editor" in sys.argv:
     from pfx_editor_pyside import main as _particle_editor_main
     raise SystemExit(_particle_editor_main())
+if "--player-colors-editor" in sys.argv:
+    from player_colors_pyside import main as _player_colors_editor_main
+    raise SystemExit(_player_colors_editor_main())
 if not hasattr(flet, "icons"):
     class _Icons:
         def __getattr__(self, name: str) -> str:
@@ -198,8 +201,9 @@ from concurrent.futures import ThreadPoolExecutor
 import re
 import time
 from Modules.shared_styles_fix import (
-    TEAL, PANEL_BG, CARD_BG, SIDEBAR_BG, INPUT_BG, OUTPUT_BG,
-    CARD_PADDING, RADIUS, PANEL_WIDTH, HERO_WIDTH, TEXT_MUTED, SMALL_WIDTH,
+    TEAL, ACCENT_BLUE, APP_BG, PANEL_BG, CARD_BG, CARD_BG_ALT, SIDEBAR_BG,
+    INPUT_BG, OUTPUT_BG, CARD_PADDING, RADIUS, PANEL_WIDTH, HERO_WIDTH,
+    TEXT_PRIMARY, TEXT_MUTED, TEXT_DIM, SMALL_WIDTH,
 )
 
 set_windows_app_identity()
@@ -207,7 +211,7 @@ set_windows_app_identity()
 def configure_startup_window(page: Page):
     page.title = APP_NAME
     page.theme_mode = "dark"
-    page.bgcolor = "#121212"
+    page.bgcolor = APP_BG
     page.window.icon = asset_path("icon.ico")
     page.window.width = 1200
     page.window.height = 800
@@ -389,38 +393,89 @@ def main(page: Page):
 
             # Top-level content area that will host Home / Workflows / Tools
             from Modules.shared_styles_fix import (
-                TEAL, PANEL_BG, CARD_BG, SIDEBAR_BG, INPUT_BG, OUTPUT_BG,
-                CARD_PADDING, RADIUS, PANEL_WIDTH, HERO_WIDTH, TEXT_MUTED,
+                TEAL, ACCENT_BLUE, ACCENT_GREEN, ACCENT_RED, PANEL_BG, CARD_BG,
+                CARD_BG_ALT, SIDEBAR_BG, INPUT_BG, OUTPUT_BG, CARD_PADDING,
+                RADIUS, PANEL_WIDTH, HERO_WIDTH, TEXT_PRIMARY, TEXT_MUTED,
+                TEXT_DIM, SMALL_WIDTH,
             )
             top_content = Column(expand=True)
-            card_style = dict(padding=CARD_PADDING, border_radius=RADIUS, bgcolor=CARD_BG)
+            card_style = dict(padding=18, border_radius=RADIUS, bgcolor=CARD_BG)
 
-            # Home content — hero banner + feature cards (visual only)
+            def eyebrow(text: str, color: str = TEAL):
+                return Text(text.upper(), size=11, weight="bold", color=color)
 
-            hero = Container(
-                Column([
-                    Text("Halo Wars 2 Modding Suite", size=36, weight="bold"),
-                    Text("Builders · Converters · Packaging", size=14, color="white70"),
-                ], alignment="center", horizontal_alignment="center"),
-                padding=24,
-                width=HERO_WIDTH,
-                bgcolor=PANEL_BG,
-                border_radius=RADIUS,
-            )
+            def page_header(title: str, subtitle: str, kicker: str = "Halo Wars 2", width: int = HERO_WIDTH):
+                return Container(
+                    Column([
+                        eyebrow(kicker),
+                        Text(title, size=34, weight="bold", color=TEXT_PRIMARY),
+                        Text(subtitle, size=14, color=TEXT_MUTED),
+                    ], alignment="start", horizontal_alignment="start", spacing=6),
+                    padding=24,
+                    width=width,
+                    bgcolor=PANEL_BG,
+                    border_radius=RADIUS,
+                )
+
+            def action_card(title: str, subtitle: str, button_text: str, on_click, accent: str = TEAL):
+                return Container(
+                    Column([
+                        eyebrow(title, accent),
+                        Text(title, size=17, weight="bold", color=TEXT_PRIMARY),
+                        Text(subtitle, color=TEXT_MUTED, size=12),
+                        Button(button_text, on_click=on_click),
+                    ], alignment="start", horizontal_alignment="start", spacing=9),
+                    **card_style,
+                    expand=True,
+                )
+
+            def info_card(title: str, body: str, accent: str = TEAL):
+                return Container(
+                    Column([
+                        eyebrow(title, accent),
+                        Text(title, size=15, weight="bold", color=TEXT_PRIMARY),
+                        Text(body, color=TEXT_MUTED, size=12),
+                    ], alignment="start", horizontal_alignment="start", spacing=7),
+                    padding=16,
+                    bgcolor=CARD_BG_ALT,
+                    border_radius=RADIUS,
+                    expand=True,
+                )
+
+            def workflow_sidebar(title: str, buttons: list[Button]):
+                return Container(
+                    Column([
+                        eyebrow("Workflow"),
+                        Text(title, size=18, weight="bold", color=TEXT_PRIMARY),
+                        Divider(),
+                        *buttons,
+                    ], width=230, spacing=8, scroll=ScrollMode.AUTO, expand=True),
+                    bgcolor=SIDEBAR_BG,
+                    padding=16,
+                )
+
+            # Home content - professional dashboard shell.
 
             card_style = dict(padding=CARD_PADDING, border_radius=RADIUS, bgcolor=CARD_BG)
 
             features = Row([
-                Container(Column([Text("Workflows", size=16, weight="bold"), Text("Step-by-step builders for Units, Squads, UIENT, Entity and more.", color="white70", size=12), Button("Open", on_click=lambda e: set_top_content(workflows_list))], spacing=8), **card_style, expand=True),
-                Container(Column([Text("Tools", size=16, weight="bold"), Text("Quick format conversions: DDS/DDX, Ancilla, Phoenix.", color="white70", size=12), Button("Open", on_click=lambda e: set_top_content(tools_list))], spacing=8), **card_style, expand=True),
+                action_card("Workflows", "Step-by-step builders for units, squads, UI data, player colors, and mod publishing.", "Open Workflows", lambda e: set_top_content(workflows_list), TEAL),
+                action_card("Tools", "Focused utilities for texture extensions, XML/XMB conversion, packaging, CRCs, and particles.", "Open Tools", lambda e: set_top_content(tools_list), ACCENT_BLUE),
             ], spacing=16, expand=True)
 
             home_content = Column([
-                hero,
-                Divider(),
+                page_header(
+                    "Halo Wars 2 Modding Suite",
+                    "A focused desktop workspace for building, converting, packaging, and validating Halo Wars 2 mod assets.",
+                    "Project workspace",
+                ),
                 features,
-                Divider(),
-                Column([Text("Created by", size=18, weight="bold"), Text("CutesyThrower12", size=14, color="white70")], spacing=6, alignment="center", horizontal_alignment="center"),
+                Row([
+                    info_card("Builders", "Create common gameplay data without hand-editing every XML block.", TEAL),
+                    info_card("Packaging", "Compile folders into game-ready package outputs and manifests.", ACCENT_GREEN),
+                    info_card("Particle Studio", "Launch the dedicated PFX editor for colors, gradients, and scale values.", ACCENT_BLUE),
+                ], spacing=16, expand=True),
+                Text("Created by CutesyThrower12", size=12, color=TEXT_DIM),
             ], alignment="center", horizontal_alignment="center", expand=True, spacing=16)
 
             # Lazy-create builder tabs to speed up startup; create on first use
@@ -490,6 +545,37 @@ def main(page: Page):
                     player_colors_tab_content = player_colors_tab(page)
                 return player_colors_tab_content
 
+            def launch_player_colors_editor(e=None):
+                """Launch the PySide player colors editor as a separate process."""
+                try:
+                    editor_path = (
+                        runtime_path("player_colors_pyside.py")
+                        if getattr(sys, "frozen", False)
+                        else os.path.join(SRC_DIR, "player_colors_pyside.py")
+                    )
+                    if not getattr(sys, "frozen", False) and not os.path.exists(editor_path):
+                        page.snack_bar = SnackBar(Text("Player Colors Editor script not found."), open=True)
+                        page.update()
+                        return
+
+                    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+                    if getattr(sys, "frozen", False):
+                        subprocess.Popen(
+                            [sys.executable, "--player-colors-editor"],
+                            cwd=BASE_DIR,
+                            creationflags=creationflags,
+                        )
+                    else:
+                        subprocess.Popen(
+                            [sys.executable or "python", editor_path],
+                            cwd=BASE_DIR,
+                            creationflags=creationflags,
+                        )
+                    page.snack_bar = SnackBar(Text("Launched Player Colors Editor."), open=True)
+                except Exception as ex:
+                    page.snack_bar = SnackBar(Text(f"Failed to launch Player Colors Editor: {ex}"), open=True)
+                page.update()
+
             def get_packager_tab():
                 nonlocal packager_tab_content
                 if packager_tab_content is None:
@@ -519,29 +605,24 @@ def main(page: Page):
 
                 workflow_main = Column(expand=True, scroll=ScrollMode.AUTO)
 
-                # overview content for this workflow (styled hero + cards)
-                wf_hero = Container(
-                    Column([
-                        Text("Custom Unit Workflow", size=24, weight="bold"),
-                        Text("Guides you through preparing a custom unit for Halo Wars 2.", size=14, color="white70"),
-                    ], alignment="start", horizontal_alignment="start"),
-                    padding=16,
-                    bgcolor=PANEL_BG,
-                    border_radius=RADIUS,
-                    width=PANEL_WIDTH,
+                wf_hero = page_header(
+                    "Custom Unit Workflow",
+                    "Prepare visuals, gameplay data, UI strings, entities, tech logic, and packaged outputs from one guided workspace.",
+                    "Unit production",
+                    PANEL_WIDTH,
                 )
 
                 # Build a stylized overview using cards for consistency
                 steps = [
-                    ("🖼️", "Prepare assets", "Create visuals (.vis) and textures; use the Tools tab (DDS/DDX) as needed."),
-                    ("⚙️", "Create unit data", "Open the Unit Builder to define code names, stats, hitpoints and damage types."),
-                    ("⚔️", "Assemble squads", "Use the Squad Builder to define squad composition, counters and behaviors."),
-                    ("📝", "Edit UI strings", "Use the UIENT builder to generate string entries for the UI."),
-                    ("🧬", "Create entities", "Author Object definitions and link visuals in the Entity builder."),
-                    ("🗺️", "Minimap & Decals", "Configure minimap icons and decals in the Minimap tab."),
-                    ("🔧", "Techs & Validate", "Validate tech logic and ensure compatibility in the Techs builder."),
-                    ("📦", "Package", "Gather outputs and build your package with the Packager."),
-                    ("📥", "Import/Apply", "Paste packaged outputs into the correct XML paths for the game."),
+                    ("01", "Prepare assets", "Create visuals (.vis) and textures; use the Tools tab for DDS/DDX work as needed."),
+                    ("02", "Create unit data", "Define code names, stats, hitpoints, movement, armor, and damage types."),
+                    ("03", "Assemble squads", "Build squad composition, counters, formations, and behavior links."),
+                    ("04", "Edit UI strings", "Generate UIENT strings for readable in-game names and descriptions."),
+                    ("05", "Create entities", "Author object definitions and link visuals in the Entity builder."),
+                    ("06", "Minimap & decals", "Configure minimap icons and decal references."),
+                    ("07", "Tech logic", "Validate technology logic and compatibility."),
+                    ("08", "Package", "Gather outputs and build the final mod package."),
+                    ("09", "Import/apply", "Move packaged outputs into the expected game XML paths."),
                 ]
 
                 # Preset examples for unit previews
@@ -682,8 +763,9 @@ def main(page: Page):
                 for icon, title, desc in steps:
                     item = Container(
                         Column([
-                            Text(f"{icon}  {title}", size=16, weight="bold"),
-                            Text(desc, color="white70", size=12),
+                            eyebrow(icon, ACCENT_BLUE),
+                            Text(title, size=16, weight="bold", color=TEXT_PRIMARY),
+                            Text(desc, color=TEXT_MUTED, size=12),
                         ], spacing=8),
                         **card_style,
                         expand=True,
@@ -705,16 +787,14 @@ def main(page: Page):
 
                 overview_content = Column([
                     wf_hero,
-                    Divider(),
                     Column([
-                        Column([Text("Workflow Overview", size=18, weight="bold"), Text("Follow these steps to create, package, and publish a custom unit for Halo Wars 2.", color="white70")], spacing=12),
-                        Divider(),
+                        Column([Text("Workflow Overview", size=18, weight="bold", color=TEXT_PRIMARY), Text("Follow these steps to create, package, and publish a custom unit for Halo Wars 2.", color=TEXT_MUTED)], spacing=8),
                         Column(card_items, spacing=12, expand=True),
                     ], expand=True, spacing=12),
-                    Divider(),
                     Container(
                         Column([
-                            Text("Preset Examples", size=16, weight="bold"),
+                            eyebrow("Reference library", TEAL),
+                            Text("Preset Examples", size=16, weight="bold", color=TEXT_PRIMARY),
                             presets_container,
                             preset_preview,
                         ], spacing=8),
@@ -722,27 +802,19 @@ def main(page: Page):
                     ),
                 ], alignment="start", spacing=12, expand=True)
 
-                workflow_sidebar = Column(
-                    [
-                        Text("Custom Unit Workflow", size=18, weight="bold"),
-                        Button("🏠  Overview", on_click=lambda ev: switch_workflow_tab(overview_content)),
-                        Button("⚙️  Unit Builder", on_click=lambda ev: switch_workflow_tab(get_unit_tab())),
-                        Button("⚔️  Squad Builder", on_click=lambda ev: switch_workflow_tab(get_squad_tab())),
-                        Button("📝  UIENT Builder", on_click=lambda ev: switch_workflow_tab(get_uient_tab())),
-                        Button("🧬  Entity Builder", on_click=lambda ev: switch_workflow_tab(get_entity_tab())),
-                        Button("🗺️  Minimap & Decals", on_click=lambda ev: switch_workflow_tab(get_minimap_tab())),
-                        # Player Colors removed from Custom Unit Workflow sidebar
-                        Button("🔧  Techs Logic Builder", on_click=lambda ev: switch_workflow_tab(get_tech_tab())),
-                        Button("📦  Packager", on_click=lambda ev: switch_workflow_tab(get_packager_tab())),
-                    ],
-                    width=220,
-                    spacing=8,
-                    scroll=ScrollMode.AUTO,
-                    expand=True,
-                )
+                workflow_sidebar_panel = workflow_sidebar("Custom Unit", [
+                    Button("Overview", on_click=lambda ev: switch_workflow_tab(overview_content)),
+                    Button("Unit Builder", on_click=lambda ev: switch_workflow_tab(get_unit_tab())),
+                    Button("Squad Builder", on_click=lambda ev: switch_workflow_tab(get_squad_tab())),
+                    Button("UIENT Builder", on_click=lambda ev: switch_workflow_tab(get_uient_tab())),
+                    Button("Entity Builder", on_click=lambda ev: switch_workflow_tab(get_entity_tab())),
+                    Button("Minimap & Decals", on_click=lambda ev: switch_workflow_tab(get_minimap_tab())),
+                    Button("Tech Logic Builder", on_click=lambda ev: switch_workflow_tab(get_tech_tab())),
+                    Button("Packager", on_click=lambda ev: switch_workflow_tab(get_packager_tab())),
+                ])
 
                 workflow_layout = Row([
-                    Container(workflow_sidebar, bgcolor=SIDEBAR_BG, padding=CARD_PADDING),
+                    workflow_sidebar_panel,
                     Container(workflow_main, expand=True, padding=16),
                 ], expand=True)
 
@@ -762,19 +834,17 @@ def main(page: Page):
                 leader_main = Column(expand=True, scroll=ScrollMode.AUTO)
 
                 overview = Column([
-                    Container(Column([Text("Leader Power Workflow", size=22, weight="bold"), Text("Create and manage Leader Power UIENT entries (multi-tier, active/passive).", color=TEXT_MUTED)], alignment="start", spacing=6), padding=CARD_PADDING, bgcolor=PANEL_BG, border_radius=RADIUS, width=SMALL_WIDTH),
-                    Divider(),
-                    Container(Column([Text("Use the builder to generate per-tier UIENT strings and copy them into your uient.xml.", color="white70")], spacing=6), **card_style)
+                    page_header("Leader Power Workflow", "Create and manage multi-tier active and passive leader power UIENT entries.", "Leader powers", SMALL_WIDTH),
+                    info_card("Builder Output", "Generate per-tier UIENT strings and copy them into your uient.xml.", ACCENT_BLUE),
                 ], alignment="start", spacing=8, expand=True)
 
-                sidebar = Column([
-                    Text("Leader Power Workflow", size=18, weight="bold"),
-                    Button("🏠 Overview", on_click=lambda ev: switch_workflow_tab(overview)),
-                    Button("📝 Leader Power Builder", on_click=lambda ev: switch_workflow_tab(get_leader_tab())),
-                ], width=220, spacing=8, scroll=ScrollMode.AUTO, expand=True)
+                sidebar = workflow_sidebar("Leader Power", [
+                    Button("Overview", on_click=lambda ev: switch_workflow_tab(overview)),
+                    Button("Leader Power Builder", on_click=lambda ev: switch_workflow_tab(get_leader_tab())),
+                ])
 
                 layout = Row([
-                    Container(sidebar, bgcolor=SIDEBAR_BG, padding=CARD_PADDING),
+                    sidebar,
                     Container(leader_main, expand=True, padding=16),
                 ], expand=True)
 
@@ -783,46 +853,24 @@ def main(page: Page):
                 set_top_content(layout)
 
             def open_player_colors_workflow(e=None):
-                def switch_workflow_tab(tab_content):
-                    pc_main.controls.clear()
-                    pc_main.controls.append(tab_content)
-                    page.update()
-
-                pc_main = Column(expand=True, scroll=ScrollMode.AUTO)
-
                 overview = Column([
-                    Container(Column([Text("Player Colors Workflow", size=22, weight="bold"), Text("Create and manage skirmish player color definitions.", color=TEXT_MUTED)], alignment="start", spacing=6), padding=CARD_PADDING, bgcolor=PANEL_BG, border_radius=RADIUS, width=SMALL_WIDTH),
-                    Divider(),
+                    page_header("Player Colors Workflow", "Create, import, reorder, and export skirmish player color definitions.", "Color definitions", SMALL_WIDTH),
                     Container(
                         Column([
-                            Text("Use the builder to edit color palettes, assign player slots and export playercolors.xml.", color="white70"),
-                            Divider(),
+                            Text("The dedicated PySide editor opens in its own window with live previews, direct color picking, civ slot assignment, XML preview, and export.", color=TEXT_MUTED),
                             Row([
-                                Container(Column([Text("Refresh", weight="bold"), Text("Press the Refresh button to update pages so edited color names appear across the app.", color="white70")], spacing=4), padding=CARD_PADDING, bgcolor=CARD_BG, border_radius=RADIUS, expand=True),
-                                Container(Column([Text("Import", weight="bold"), Text("Import a playercolors.xml to use someone else's player color definitions.", color="white70")], spacing=4), padding=CARD_PADDING, bgcolor=CARD_BG, border_radius=RADIUS, expand=True),
-                                Container(Column([Text("Edit Order", weight="bold"), Text("Use the Edit Order tab to change where colors are used and reorder which player has each color.", color="white70")], spacing=4), padding=CARD_PADDING, bgcolor=CARD_BG, border_radius=RADIUS, expand=True),
+                                info_card("Live Editing", "Adjust RGB values and pick colors without rebuilding or refreshing the view.", TEAL),
+                                info_card("Import / Export", "Load an existing playercolors.xml and save a ready-to-package file.", ACCENT_BLUE),
+                                info_card("Skirmish Order", "Assign team colors per player slot for UNSC, Covenant, and Flood.", ACCENT_GREEN),
                             ], spacing=8),
-                            Divider(),
-                            Text("Export: Use 'Export playercolors.xml' to save the current player colors to an XML file for sharing or packaging.", color="white70"),
+                            Row([
+                                Button("Launch Player Colors Editor", on_click=launch_player_colors_editor),
+                            ], spacing=8),
                         ], spacing=6),
                         **card_style
                     )
                 ], alignment="start", spacing=8, expand=True)
-
-                sidebar = Column([
-                    Text("Player Colors Workflow", size=18, weight="bold"),
-                    Button("🏠 Overview", on_click=lambda ev: switch_workflow_tab(overview)),
-                    Button("🎨 Player Colors Builder", on_click=lambda ev: switch_workflow_tab(get_player_colors_tab())),
-                ], width=220, spacing=8, scroll=ScrollMode.AUTO, expand=True)
-
-                layout = Row([
-                    Container(sidebar, bgcolor=SIDEBAR_BG, padding=CARD_PADDING),
-                    Container(pc_main, expand=True, padding=16),
-                ], expand=True)
-
-                pc_main.controls.clear()
-                pc_main.controls.append(overview)
-                set_top_content(layout)
+                set_top_content(Container(overview, expand=True, padding=16))
 
             def open_compile_mod_workflow(e=None):
                 # Sidebar for Compile Mod workflow
@@ -834,16 +882,14 @@ def main(page: Page):
                 compile_main = Column(expand=True, scroll=ScrollMode.AUTO)
 
                 overview = Column([
-                    Container(Column([Text("Compile Mod Workflow", size=22, weight="bold"), Text("Select a mod folder and press Compile Mod — the tool will package, checksum, generate the manifest, and export to GTS.", color=TEXT_MUTED)], alignment="start", spacing=6), padding=CARD_PADDING, bgcolor=PANEL_BG, border_radius=RADIUS, width=SMALL_WIDTH),
-                    Divider(),
-                    Container(Column([Text("Flow: 1) Select a mod directory. 2) Press Compile Mod to package and export.", color="white70")], spacing=6), **card_style)
+                    page_header("Compile Mod Workflow", "Package, checksum, manifest, and export a mod folder to the active GTS directory.", "Build pipeline", SMALL_WIDTH),
+                    info_card("One-button flow", "Select a mod directory, choose XML packaging behavior, then press Compile Mod.", ACCENT_GREEN),
                 ], alignment="start", spacing=8, expand=True)
 
-                sidebar = Column([
-                    Text("Compile Mod Workflow", size=18, weight="bold"),
-                    Button("🏠 Overview", on_click=lambda ev: switch_workflow_tab(overview)),
-                    Button("📦 Compile Mod Builder", on_click=lambda ev: switch_workflow_tab(build_tab)),
-                ], width=220, spacing=8, scroll=ScrollMode.AUTO, expand=True)
+                sidebar = workflow_sidebar("Compile Mod", [
+                    Button("Overview", on_click=lambda ev: switch_workflow_tab(overview)),
+                    Button("Compile Mod Builder", on_click=lambda ev: switch_workflow_tab(build_tab)),
+                ])
 
                 # Build tab content
                 from Modules.shared_utils_fast import crc32_bytes, crc32_file_fast, safe_set_clipboard
@@ -1591,7 +1637,7 @@ def main(page: Page):
                 ], alignment="start", horizontal_alignment="start", spacing=8)
 
                 layout = Row([
-                    Container(sidebar, bgcolor=SIDEBAR_BG, padding=CARD_PADDING),
+                    sidebar,
                     Container(compile_main, expand=True, padding=16),
                 ], expand=True)
 
@@ -1603,22 +1649,18 @@ def main(page: Page):
             # TEAL provided by shared styles
             card_style = dict(padding=CARD_PADDING, border_radius=RADIUS, bgcolor=CARD_BG)
 
-            wf_hero = Container(
-                Column([
-                    Text("Workflows", size=28, weight="bold"),
-                    Text("Step-through builders to create and validate game data.", size=14, color="white70"),
-                ], alignment="center", horizontal_alignment="center"),
-                padding=18,
-                width=PANEL_WIDTH,
-                bgcolor=PANEL_BG,
-                border_radius=RADIUS,
+            wf_hero = page_header(
+                "Workflows",
+                "Guided builders for creating game data, compiling packages, and preparing player-facing mod files.",
+                "Suite workflows",
+                PANEL_WIDTH,
             )
 
             wf_features = Row([
-                Container(Column([Text("Custom Unit", size=16, weight="bold"), Text("Unit, Squad, Entity, Minimap and Techs builders.", color="white70", size=12), Button("Open", on_click=open_custom_unit_workflow)], alignment="start", horizontal_alignment="start", spacing=8), **card_style, expand=True),
-                Container(Column([Text("Leader Power", size=16, weight="bold"), Text("Dedicated leader power builder (multi-tier).", color="white70", size=12), Button("Open", on_click=open_leader_power_workflow)], alignment="start", horizontal_alignment="start", spacing=8), **card_style, expand=True),
-                Container(Column([Text("Compile Mod", size=16, weight="bold"), Text("Build .pkg, compute CRC, and export file manifest.", color="white70", size=12), Button("Open", on_click=open_compile_mod_workflow)], alignment="start", horizontal_alignment="start", spacing=8), **card_style, expand=True),
-                Container(Column([Text("Player Colors", size=16, weight="bold"), Text("Customize skirmish and campaign player colors.", color="white70", size=12), Button("Open", on_click=lambda e: open_player_colors_workflow())], alignment="start", horizontal_alignment="start", spacing=8), **card_style, expand=True),
+                action_card("Custom Unit", "Unit, squad, entity, minimap, tech, and packaging builders.", "Open", open_custom_unit_workflow, TEAL),
+                action_card("Leader Power", "Dedicated multi-tier leader power UIENT workflow.", "Open", open_leader_power_workflow, ACCENT_BLUE),
+                action_card("Compile Mod", "Build packages, compute CRCs, generate manifests, and export.", "Open", open_compile_mod_workflow, ACCENT_GREEN),
+                action_card("Player Colors", "Customize skirmish and campaign player color definitions.", "Open", lambda e: open_player_colors_workflow(), ACCENT_RED),
                 # (Particle Editor is kept in Tools)
             ], spacing=16, expand=True)
 
@@ -2169,23 +2211,19 @@ def main(page: Page):
 
             # Phoenix automated conversion removed: launcher-only UI is used instead.
             # Tools list — styled like Home
-            tools_hero = Container(
-                Column([
-                    Text("Tools", size=28, weight="bold"),
-                    Text("Quick converters and utilities for asset preparation.", size=14, color="white70"),
-                ], alignment="center", horizontal_alignment="center"),
-                padding=18,
-                width=920,
-                bgcolor=PANEL_BG,
-                border_radius=RADIUS,
+            tools_hero = page_header(
+                "Tools",
+                "Conversion, packaging, checksum, and particle utilities collected in one practical workspace.",
+                "Asset utilities",
+                PANEL_WIDTH,
             )
 
             tools_features = Row([
-                Container(Column([Text("DDS/DDX", size=16, weight="bold"), Text("Rename or batch-edit texture extensions.", color="white70", size=12), Button("Open", on_click=lambda ev: set_top_content(tools_content))], spacing=8), **card_style, expand=True),
-                Container(Column([Text("Ancilla", size=16, weight="bold"), Text("Convert editable XML to XMB.", color="white70", size=12), Button("Open", on_click=lambda ev: set_top_content(convert_evolved_content))], spacing=8), **card_style, expand=True),
-                Container(Column([Text("Phoenix", size=16, weight="bold"), Text("XMB to XML conversion via Phoenix GUI.", color="white70", size=12), Button("Launch", on_click=launch_phoenix_gui)], spacing=8), **card_style, expand=True),
-                Container(Column([Text("PKG Builder", size=16, weight="bold"), Text("Compile folders into .pkg files.", color="white70", size=12), Button("Open", on_click=open_pkg_builder_tool)], spacing=8), **card_style, expand=True),
-                Container(Column([Text("Particle Editor", size=16, weight="bold"), Text("Edit PFX colors and scale data in a PySide window.", color="white70", size=12), Button("Launch", on_click=launch_pfx_editor)], spacing=8), **card_style, expand=True),
+                action_card("DDS/DDX", "Rename or batch-edit texture extensions.", "Open", lambda ev: set_top_content(tools_content), TEAL),
+                action_card("Ancilla", "Convert editable XML back to game-readable XMB.", "Open", lambda ev: set_top_content(convert_evolved_content), ACCENT_BLUE),
+                action_card("Phoenix", "Launch the Phoenix GUI for XMB to XML conversion.", "Launch", launch_phoenix_gui, ACCENT_GREEN),
+                action_card("PKG Builder", "Compile folders into .pkg archives.", "Open", open_pkg_builder_tool, ACCENT_BLUE),
+                action_card("Particle Editor", "Edit PFX colors, gradients, controls, and scale data.", "Launch", launch_pfx_editor, ACCENT_RED),
             ], spacing=16, expand=True)
 
             # CRC32 Calculator — placed in a secondary row under the main tools
@@ -2311,7 +2349,7 @@ def main(page: Page):
             )
 
             tools_secondary = Row([
-                Container(Column([Text("CRC32 Calculator", size=16, weight="bold"), Text("Compute CRC-32 for files (hex + decimal).", color="white70", size=12), Button("Open", on_click=lambda ev: set_top_content(crc_content))], spacing=8), **card_style, expand=True),
+                action_card("CRC32 Calculator", "Compute CRC-32 for files in hex and decimal formats.", "Open", lambda ev: set_top_content(crc_content), TEAL),
             ], spacing=16, expand=True)
 
             tools_list = Column([
@@ -2327,14 +2365,24 @@ def main(page: Page):
                 Button("Home", on_click=lambda e: set_top_content(home_content)),
                 Button("Workflows", on_click=lambda e: set_top_content(workflows_list)),
                 Button("Tools", on_click=lambda e: set_top_content(tools_list)),
-            ], spacing=12)
+            ], spacing=10)
 
             page.add(
                 Stack([
                     Image(src=asset_path("background.png"), expand=True),
                     Column([
-                        Container(tabs_row, padding=CARD_PADDING),
-                        Container(top_content, expand=True, padding=20),
+                        Container(
+                            Row([
+                                Column([
+                                    Text("HW2 Modding Suite", size=18, weight="bold", color=TEXT_PRIMARY),
+                                    Text("Halo Wars 2 content workspace", size=11, color=TEXT_DIM),
+                                ], spacing=2),
+                                tabs_row,
+                            ], alignment="spaceBetween"),
+                            padding=16,
+                            bgcolor=SIDEBAR_BG,
+                        ),
+                        Container(top_content, expand=True, padding=24),
                     ], expand=True),
                 ], expand=True)
             )

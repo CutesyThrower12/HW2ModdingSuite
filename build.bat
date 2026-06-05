@@ -70,6 +70,7 @@ set "LIB=%SRC%\Modules\Library"
 set "TOOLS_DIR=%PROJ%tools"
 set "MODULES_DIR=%SRC%\Modules"
 set "PFX_EDITOR=%SRC%\pfx_editor_pyside.py"
+set "PLAYER_COLORS_EDITOR=%SRC%\player_colors_pyside.py"
 set "RUST_PACKAGER_SRC=%PROJ%src-rust\HW2Packager"
 set "RUST_PACKAGER_EXE=%TOOLS_DIR%\HW2Packager\hw2pkg.exe"
 
@@ -99,6 +100,11 @@ if not exist "%TOOLS_DIR%" (
 )
 if not exist "%PFX_EDITOR%" (
   echo [ERROR] Missing: %PFX_EDITOR%
+  pause
+  exit /b 1
+)
+if not exist "%PLAYER_COLORS_EDITOR%" (
+  echo [ERROR] Missing: %PLAYER_COLORS_EDITOR%
   pause
   exit /b 1
 )
