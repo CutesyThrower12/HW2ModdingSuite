@@ -138,8 +138,8 @@ def build_squad_xml(
 # Squad Builder Tab
 # -------------------------------------------------------
 def squad_builder_tab(page):
-    TEAL = "#a0cafd"
-    GRAY = "#2b2b2b"
+    TEAL = "#75D8FF"
+    GRAY = "#0B1018"
 
     # ----------------------- General -----------------------
     squad_name = TextField(label="Squad Name", hint_text="unsc_inf_marine_01", bgcolor=GRAY, width=400)
@@ -528,7 +528,7 @@ def squad_builder_tab(page):
     has_ability.on_change = lambda e: (setattr(ability_mode, "visible", has_ability.value), setattr(ability_type, "visible", has_ability.value), setattr(ability_preset_dropdown, "visible", has_ability.value), page.update())
 
     # ----------------------- Output -----------------------
-    output_box = TextField(multiline=True,min_lines=16,max_lines=24,bgcolor="#111111",width=900)
+    output_box = TextField(multiline=True,min_lines=16,max_lines=24,bgcolor="#080D14",width=900)
     generate_button = Button("Generate XML")
     def copy_output(e):
         if not output_box.value.strip():

@@ -18,8 +18,8 @@ from flet import (
 # ---------------------------
 
 def entity_builder_tab(page):
-    TEAL = "#a0cafd"
-    GRAY = "#2b2b2b"
+    TEAL = "#75D8FF"
+    GRAY = "#0B1018"
 
     # ---------------------------
     # Helper: Snackbar
@@ -76,7 +76,7 @@ def entity_builder_tab(page):
     custom_type_field = TextField(label="Custom Type (when selected above)", value="", bgcolor=GRAY, width=240)
 
     # Output box
-    output_box = TextField(multiline=True, min_lines=12, max_lines=20, bgcolor="#111111", width=900)
+    output_box = TextField(multiline=True, min_lines=12, max_lines=20, bgcolor="#080D14", width=900)
 
     # ---------------------------
     # Auto update ability path + UIENT when key changes

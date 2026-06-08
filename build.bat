@@ -2,20 +2,22 @@
 setlocal EnableExtensions
 
 cd /d "%~dp0"
+set "PROJECT_ROOT=%CD%"
 
 REM --- Path to Python (user-specified) ---
 set "PY=C:\Users\Admin\AppData\Local\Python\pythoncore-3.14-64\python.exe"
 
 REM --- Organized project paths ---
-set "SRC=%~dp0src"
-set "ASSETS=%~dp0assets"
-set "SCRIPTS=%~dp0scripts"
-set "OUTPUT_DIR=%~dp0dist"
-set "ROOT=%~dp0build\pyinstaller"
+set "SRC=%PROJECT_ROOT%\src"
+set "ASSETS=%PROJECT_ROOT%\assets"
+set "SCRIPTS=%PROJECT_ROOT%\scripts"
+set "OUTPUT_DIR=%PROJECT_ROOT%\dist"
+set "ROOT=%PROJECT_ROOT%\build\pyinstaller"
 set "DIST_DIR=%ROOT%\dist"
 set "LOG=%ROOT%\build.log"
 set "DEPS_STAMP=%ROOT%\deps.ok"
 set "BUILD_PROGRESS=%SCRIPTS%\build_progress.ps1"
+set "BUILD_RUST_PACKAGER=%SCRIPTS%\build_rust_packager.ps1"
 
 if not exist "%ROOT%" mkdir "%ROOT%" >nul 2>nul
 if not exist "%DIST_DIR%" mkdir "%DIST_DIR%" >nul 2>nul
@@ -61,8 +63,9 @@ if "%CHECK_DEPS%"=="1" (
 )
 
 call :progress 4 "Validating assets" 0
-set "PROJ=%~dp0"
-set "PROJ_ARG=%PROJ:~0,-1%"
+set "PROJ=%PROJECT_ROOT%\"
+set "PROJ_ARG=%PROJECT_ROOT%"
+if "%PROJ_ARG%"=="" set "PROJ_ARG=%CD%"
 set "BG=%ASSETS%\background.png"
 set "MP4=%ASSETS%\intro.mp4"
 set "ICON=%ASSETS%\icon.ico"
@@ -71,8 +74,10 @@ set "TOOLS_DIR=%PROJ%tools"
 set "MODULES_DIR=%SRC%\Modules"
 set "PFX_EDITOR=%SRC%\pfx_editor_pyside.py"
 set "PLAYER_COLORS_EDITOR=%SRC%\player_colors_pyside.py"
-set "RUST_PACKAGER_SRC=%PROJ%src-rust\HW2Packager"
-set "RUST_PACKAGER_EXE=%TOOLS_DIR%\HW2Packager\hw2pkg.exe"
+set "AI_EDITOR=%SRC%\hw2_ai_editor\main.py"
+set "RUST_PACKAGER_SRC=%PROJECT_ROOT%\src-rust\HW2Packager"
+set "RUST_PACKAGER_OUT=%RUST_PACKAGER_SRC%\target\release\hw2pkg.exe"
+set "RUST_PACKAGER_EXE=%PROJECT_ROOT%\tools\HW2Packager\hw2pkg.exe"
 
 if not exist "%BG%" (
   echo [ERROR] Missing: %BG%
@@ -108,6 +113,11 @@ if not exist "%PLAYER_COLORS_EDITOR%" (
   pause
   exit /b 1
 )
+if not exist "%AI_EDITOR%" (
+  echo [ERROR] Missing: %AI_EDITOR%
+  pause
+  exit /b 1
+)
 if not exist "%RUST_PACKAGER_SRC%\Cargo.toml" (
   echo [ERROR] Missing: %RUST_PACKAGER_SRC%\Cargo.toml
   pause
@@ -118,29 +128,15 @@ if not exist "%BUILD_PROGRESS%" (
   pause
   exit /b 1
 )
+if not exist "%BUILD_RUST_PACKAGER%" (
+  echo [ERROR] Missing: %BUILD_RUST_PACKAGER%
+  pause
+  exit /b 1
+)
 
 call :progress 5 "Building fast PKG packager" 0
-where cargo >nul 2>nul
-if errorlevel 1 (
-  if not exist "%RUST_PACKAGER_EXE%" (
-    echo [ERROR] Cargo is not installed and no existing fast packager was found:
-    echo   %RUST_PACKAGER_EXE%
-    pause
-    exit /b 1
-  )
-  echo [WARN] Cargo not found; using existing fast packager.
-) else (
-  pushd "%RUST_PACKAGER_SRC%"
-  cargo build --release >>"%LOG%" 2>&1
-  if errorlevel 1 (
-    popd
-    goto :rust_failed
-  )
-  popd
-  if not exist "%TOOLS_DIR%\HW2Packager" mkdir "%TOOLS_DIR%\HW2Packager" >nul 2>nul
-  copy /y "%RUST_PACKAGER_SRC%\target\release\hw2pkg.exe" "%RUST_PACKAGER_EXE%" >>"%LOG%" 2>&1
-  if errorlevel 1 goto :rust_failed
-)
+powershell -NoProfile -ExecutionPolicy Bypass -File "%BUILD_RUST_PACKAGER%" -ProjectRoot "%PROJECT_ROOT%" -Log "%LOG%"
+if errorlevel 1 goto :rust_failed
 
 call :progress 6 "Building executable" 1
 if defined MP4 (
@@ -148,6 +144,7 @@ if defined MP4 (
 ) else (
   set "INCLUDE_INTRO="
 )
+echo [INFO] Build project: "%PROJ_ARG%" >>"%LOG%" 2>&1
 powershell -NoProfile -ExecutionPolicy Bypass -File "%BUILD_PROGRESS%" -Python "%PY%" -Project "%PROJ_ARG%" -BuildRoot "%ROOT%" %INCLUDE_INTRO%
 if errorlevel 1 goto :build_failed
 

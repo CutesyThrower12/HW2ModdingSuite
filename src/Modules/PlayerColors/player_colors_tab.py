@@ -15,7 +15,7 @@ def rgb_str(rgb):
 
 
 def player_colors_tab(page):
-    GRAY = "#2b2b2b"
+    GRAY = "#0B1018"
 
     # data
     color_defs = []  # each: {name: str, attrs: {objects:[r,g,b], corpse:..., selection:..., minimap:..., ui:..., captureeffects:..., obscuringunit:..., effects:..., lights:...}}
@@ -179,7 +179,7 @@ def player_colors_tab(page):
                             preview.bgcolor = "#444444"
 
                         sel = (selected_color_idx == idx)
-                        item = Button(content=Row([preview, Text(c["name"])], alignment="center", spacing=12), height=42, bgcolor="#2a2a2a" if sel else "#141414", style="outlined", on_click=lambda e, i=idx: select_color(i))
+                        item = Button(content=Row([preview, Text(c["name"])], alignment="center", spacing=12), height=42, bgcolor="#1B3559" if sel else "#101824", style="outlined", on_click=lambda e, i=idx: select_color(i))
                         color_list_view.controls.append(item)
                     page.update()
                     pass
@@ -201,7 +201,7 @@ def player_colors_tab(page):
                         except Exception:
                             preview.bgcolor = "#444444"
                         sel = (selected_color_idx == idx)
-                        item = Button(content=Row([preview, Text(c["name"])], alignment="center", spacing=12), height=42, bgcolor="#2a2a2a" if sel else "#141414", style="outlined", on_click=lambda e, i=idx: select_color(i))
+                        item = Button(content=Row([preview, Text(c["name"])], alignment="center", spacing=12), height=42, bgcolor="#1B3559" if sel else "#101824", style="outlined", on_click=lambda e, i=idx: select_color(i))
                         color_list_view.controls.append(item)
                     page.update()
                 _rebuild()
@@ -224,7 +224,7 @@ def player_colors_tab(page):
                     except Exception:
                         preview.bgcolor = "#444444"
                     sel = (selected_color_idx == idx)
-                    item = Button(content=Row([preview, Text(c["name"])], alignment="center", spacing=12), height=42, bgcolor="#2a2a2a" if sel else "#141414", style="outlined", on_click=lambda e, i=idx: select_color(i))
+                    item = Button(content=Row([preview, Text(c["name"])], alignment="center", spacing=12), height=42, bgcolor="#1B3559" if sel else "#101824", style="outlined", on_click=lambda e, i=idx: select_color(i))
                     color_list_view.controls.append(item)
                 # adjust skirmish civ indices that referenced removed index
                 for civ, lst in skirmish_civs.items():
@@ -251,11 +251,11 @@ def player_colors_tab(page):
             apply_btn = Button("Apply", on_click=apply_name)
 
             btn_row = Row([
-                IconButton(icon=Icon("arrow_upward"), on_click=move_up, bgcolor="#141414"),
-                IconButton(icon=Icon("arrow_downward"), on_click=move_down, bgcolor="#141414"),
-                IconButton(icon=Icon("delete"), on_click=remove, bgcolor="#141414"),
-                IconButton(icon=Icon("edit"), on_click=lambda e, ci=idx: select_color(ci), bgcolor="#141414"),
-                IconButton(icon=Icon("expand_more" if not c.get("expanded") else "expand_less"), on_click=lambda e, ci=idx: (color_defs[ci].__setitem__("expanded", not color_defs[ci].get("expanded", False)), rebuild_color_list(), page.update()), bgcolor="#141414"),
+                IconButton(icon=Icon("arrow_upward"), on_click=move_up, bgcolor="#101824"),
+                IconButton(icon=Icon("arrow_downward"), on_click=move_down, bgcolor="#101824"),
+                IconButton(icon=Icon("delete"), on_click=remove, bgcolor="#101824"),
+                IconButton(icon=Icon("edit"), on_click=lambda e, ci=idx: select_color(ci), bgcolor="#101824"),
+                IconButton(icon=Icon("expand_more" if not c.get("expanded") else "expand_less"), on_click=lambda e, ci=idx: (color_defs[ci].__setitem__("expanded", not color_defs[ci].get("expanded", False)), rebuild_color_list(), page.update()), bgcolor="#101824"),
             ], spacing=6)
             row = Row([preview, name_field, apply_btn, Text("R"), r_field, Text("G"), g_field, Text("B"), b_field, btn_row], alignment="spaceBetween")
             color_list_view.controls.append(row)
@@ -293,7 +293,7 @@ def player_colors_tab(page):
 
                     attrs_col.controls.append(Row([Text(attr_name, width=120), Text("R"), ar, Text("G"), ag, Text("B"), ab]))
 
-                color_list_view.controls.append(Container(attrs_col, padding=6, bgcolor="#111111"))
+                color_list_view.controls.append(Container(attrs_col, padding=6, bgcolor="#080D14"))
         page.update()
         page.update()
 
@@ -306,7 +306,7 @@ def player_colors_tab(page):
             preview.bgcolor = f"rgb({int(rgb[0])},{int(rgb[1])},{int(rgb[2])})"
             assigned_name = color_defs[assigned_idx]["name"]
         else:
-            preview.bgcolor = "#333333"
+            preview.bgcolor = "#0D1420"
             assigned_name = ""
 
         dd = Dropdown(options=color_options(), value=assigned_name, width=220)
@@ -511,7 +511,7 @@ def player_colors_tab(page):
             ov = c["attrs"].get("objects", [0,0,0])
             big_preview.bgcolor = f"rgb({ov[0]},{ov[1]},{ov[2]})"
         except Exception:
-            big_preview.bgcolor = "#222222"
+            big_preview.bgcolor = "#0D1420"
 
         previews = Row()
         attrs_controls = []
@@ -590,7 +590,7 @@ def player_colors_tab(page):
             try:
                 preview.bgcolor = f"rgb({av[0]},{av[1]},{av[2]})"
             except Exception:
-                preview.bgcolor = "#222222"
+                preview.bgcolor = "#0D1420"
             rgb_field = TextField(label=f"{attr} RGB", value=f"{av[0]},{av[1]},{av[2]}", width=260, bgcolor=GRAY)
 
             def make_updater(an, pr=preview, rf=rgb_field):
@@ -632,7 +632,7 @@ def player_colors_tab(page):
         detail_col.controls.append(Row([Text("Enum", width=80), enum_dd]))
         # show a larger preview and an instruction under the team color preview
         try:
-            detail_col.controls.append(Column([big_preview, Text("Pick a color to edit!", color="white70")], spacing=6))
+            detail_col.controls.append(Column([big_preview, Text("Pick a color to edit!", color="#AAB8CA")], spacing=6))
         except Exception:
             pass
         detail_col.controls.append(Divider())
@@ -836,7 +836,7 @@ def player_colors_tab(page):
                             except Exception:
                                 preview.bgcolor = "#444444"
                             sel = (selected_color_idx == i)
-                            btn = Button(content=Row([preview, Text(cd.get("name",""))], alignment="center", spacing=12), height=42, bgcolor="#2a2a2a" if sel else "#141414", on_click=lambda e, ii=i: select_color(ii, False))
+                            btn = Button(content=Row([preview, Text(cd.get("name",""))], alignment="center", spacing=12), height=42, bgcolor="#1B3559" if sel else "#101824", on_click=lambda e, ii=i: select_color(ii, False))
                             color_buttons_view.controls.append(btn)
                 except Exception:
                     pass
@@ -858,8 +858,8 @@ def player_colors_tab(page):
         Button("Refresh", on_click=refresh_views),
     ], spacing=8)
 
-    left_container = Container(Column([Text("Color Definitions", weight="bold"), actions_row, Divider(), color_list_view], spacing=8), padding=12, bgcolor="#0f0f0f", width=420, height=680)
-    right_container = Container(Column([Text("Selected Color", weight="bold"), detail_col, Divider(), Text("Skirmish Civs", weight="bold"), civs_col], spacing=8), padding=12, bgcolor="#0f0f0f", expand=True)
+    left_container = Container(Column([Text("Color Definitions", weight="bold"), actions_row, Divider(), color_list_view], spacing=8), padding=12, bgcolor="#101824", width=420, height=680)
+    right_container = Container(Column([Text("Selected Color", weight="bold"), detail_col, Divider(), Text("Skirmish Civs", weight="bold"), civs_col], spacing=8), padding=12, bgcolor="#101824", expand=True)
 
     # Simple tab switcher (avoid Tab compatibility issues)
     # "Edit Order" tab should not have import/export controls; import/reset from Edit Colors affects it.
@@ -885,11 +885,11 @@ def player_colors_tab(page):
                 except Exception:
                     preview.bgcolor = "#444444"
                 sel = (selected_color_idx == i)
-                btn = Button(content=Row([preview, Text(cd.get("name",""))], alignment="center", spacing=12), height=42, bgcolor="#2a2a2a" if sel else "#141414", on_click=lambda e, ii=i: select_color(ii, False))
+                btn = Button(content=Row([preview, Text(cd.get("name",""))], alignment="center", spacing=12), height=42, bgcolor="#1B3559" if sel else "#101824", on_click=lambda e, ii=i: select_color(ii, False))
                 color_buttons.controls.append(btn)
 
             # Instruction placed under the divider below the scrollable color buttons
-            instruction = Text("Pick a team color from the list above to edit its attributes.", color="white70")
+            instruction = Text("Pick a team color from the list above to edit its attributes.", color="#AAB8CA")
             edit_col = Column([actions_row, color_buttons, Divider(), instruction, detail_col], spacing=12, expand=True)
             content_area.controls[:] = [edit_col]
         elif name == "workflow":
@@ -900,7 +900,7 @@ def player_colors_tab(page):
         page.update()
 
     # unify header button backgrounds for consistent appearance
-    HEADER_BG = "#141414"
+    HEADER_BG = "#101824"
     edit_btn = Button("Edit Colors", on_click=lambda e: switch_tab("edit"), bgcolor=HEADER_BG)
     workflow_btn = Button("Edit Order", on_click=lambda e: switch_tab("workflow"), bgcolor=HEADER_BG)
     export_btn = Button("Export", on_click=lambda e: switch_tab("export"), bgcolor=HEADER_BG)

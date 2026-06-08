@@ -133,6 +133,8 @@ $args = @(
     "--hidden-import", "flet_desktop",
     "--hidden-import", "pfx_editor_pyside",
     "--hidden-import", "player_colors_pyside",
+    "--hidden-import", "hw2_ai_editor.main",
+    "--collect-submodules", "hw2_ai_editor",
     "--hidden-import", "PySide6.QtCore",
     "--hidden-import", "PySide6.QtGui",
     "--hidden-import", "PySide6.QtWidgets",

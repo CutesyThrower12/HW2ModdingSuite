@@ -1,9 +1,10 @@
 import flet
 from flet import Column, Row, Text, TextField, Checkbox, Button, ScrollMode, SnackBar
 import os
+from Modules.shared_styles_fix import OUTPUT_BG
 
 def packager_tab(page, unit_tab=None, squad_tab=None, uient_tab=None, entity_tab=None, minimap_tab=None, tech_tab=None):
-    TEAL = "#a0cafd"
+    TEAL = "#75D8FF"
 
     # ---------------------------
     # Helper: Snackbar
@@ -27,18 +28,18 @@ def packager_tab(page, unit_tab=None, squad_tab=None, uient_tab=None, entity_tab
     # ---------------------------
     # Output fields for each module
     # ---------------------------
-    unit_box = TextField(label="Unit Builder Output", multiline=True, min_lines=6, max_lines=12, width=900)
-    squad_box = TextField(label="Squad Builder Output", multiline=True, min_lines=6, max_lines=12, width=900)
-    uient_box = TextField(label="UIENT Builder Output", multiline=True, min_lines=6, max_lines=12, width=900)
-    entity_box = TextField(label="Entity Builder Output", multiline=True, min_lines=6, max_lines=12, width=900)
-    minimap_box = TextField(label="Minimap Output", multiline=True, min_lines=6, max_lines=12, width=900)
-    decals_box = TextField(label="Decals Output", multiline=True, min_lines=6, max_lines=12, width=900)
-    tech_box = TextField(label="Tech Logic Builder Output", multiline=True, min_lines=6, max_lines=12, width=900)
+    unit_box = TextField(label="Unit Builder Output", multiline=True, min_lines=6, max_lines=12, width=900, bgcolor=OUTPUT_BG)
+    squad_box = TextField(label="Squad Builder Output", multiline=True, min_lines=6, max_lines=12, width=900, bgcolor=OUTPUT_BG)
+    uient_box = TextField(label="UIENT Builder Output", multiline=True, min_lines=6, max_lines=12, width=900, bgcolor=OUTPUT_BG)
+    entity_box = TextField(label="Entity Builder Output", multiline=True, min_lines=6, max_lines=12, width=900, bgcolor=OUTPUT_BG)
+    minimap_box = TextField(label="Minimap Output", multiline=True, min_lines=6, max_lines=12, width=900, bgcolor=OUTPUT_BG)
+    decals_box = TextField(label="Decals Output", multiline=True, min_lines=6, max_lines=12, width=900, bgcolor=OUTPUT_BG)
+    tech_box = TextField(label="Tech Logic Builder Output", multiline=True, min_lines=6, max_lines=12, width=900, bgcolor=OUTPUT_BG)
 
     # ---------------------------
     # Final packaged output
     # ---------------------------
-    final_output = TextField(label="Packaged Output", multiline=True, min_lines=12, max_lines=20, width=900)
+    final_output = TextField(label="Packaged Output", multiline=True, min_lines=12, max_lines=20, width=900, bgcolor=OUTPUT_BG)
 
     # ---------------------------
     # Packaging logic

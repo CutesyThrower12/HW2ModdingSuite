@@ -380,10 +380,32 @@ def _find_fast_packager():
     return None
 
 
-def _build_with_fast_packager(source_dir, output_path, embed_streaming_videos=False, include_loose_xml=False):
+def get_fast_packager_path():
+    return _find_fast_packager()
+
+
+def _fast_packager_command(packager, source_dir, output_path, embed_streaming_videos=False, include_loose_xml=False):
+    command = [packager, "package", source_dir, "-o", output_path]
+    if embed_streaming_videos:
+        command.append("--embed-streaming-videos")
+    if include_loose_xml:
+        command.append("--include-loose-xml")
+    return command
+
+
+def run_fast_packager_report(source_dir, output_path, embed_streaming_videos=False, include_loose_xml=False):
     packager = _find_fast_packager()
     if not packager:
-        return False
+        return {
+            "ok": False,
+            "packager": None,
+            "command": None,
+            "returncode": None,
+            "stdout": "",
+            "stderr": "Rust packager not found at tools/HW2Packager/hw2pkg.exe.",
+            "output_exists": False,
+            "output_size": 0,
+        }
 
     creationflags = 0
     startupinfo = None
@@ -396,12 +418,7 @@ def _build_with_fast_packager(source_dir, output_path, embed_streaming_videos=Fa
         except Exception:
             startupinfo = None
 
-    command = [packager, "package", source_dir, "-o", output_path]
-    if embed_streaming_videos:
-        command.append("--embed-streaming-videos")
-    if include_loose_xml:
-        command.append("--include-loose-xml")
-
+    command = _fast_packager_command(packager, source_dir, output_path, embed_streaming_videos, include_loose_xml)
     result = subprocess.run(
         command,
         capture_output=True,
@@ -409,13 +426,36 @@ def _build_with_fast_packager(source_dir, output_path, embed_streaming_videos=Fa
         creationflags=creationflags,
         startupinfo=startupinfo,
     )
-    if result.returncode != 0:
-        message = (result.stderr or result.stdout or "Fast packager failed").strip()
+    output_exists = os.path.exists(output_path)
+    output_size = os.path.getsize(output_path) if output_exists else 0
+    return {
+        "ok": result.returncode == 0 and output_exists,
+        "packager": packager,
+        "command": command,
+        "returncode": result.returncode,
+        "stdout": (result.stdout or "").strip(),
+        "stderr": (result.stderr or "").strip(),
+        "output_exists": output_exists,
+        "output_size": output_size,
+    }
+
+
+def _build_with_fast_packager(source_dir, output_path, embed_streaming_videos=False, include_loose_xml=False):
+    report = run_fast_packager_report(
+        source_dir,
+        output_path,
+        embed_streaming_videos=embed_streaming_videos,
+        include_loose_xml=include_loose_xml,
+    )
+    if not report["packager"]:
+        return False
+    if report["returncode"] != 0:
+        message = (report["stderr"] or report["stdout"] or "Fast packager failed").strip()
         raise RuntimeError(message)
-    message = (result.stderr or result.stdout).strip()
+    message = (report["stderr"] or report["stdout"]).strip()
     if message:
         print(message)
-    return os.path.exists(output_path)
+    return report["output_exists"]
 
 
 def _normalize_manifest_path(value):
@@ -499,6 +539,7 @@ def build_pkg_from_directory(
     output_path,
     progress_callback=None,
     prefer_fast_packager=True,
+    require_fast_packager=False,
     embed_streaming_videos=False,
     include_loose_xml=False,
 ):
@@ -526,8 +567,19 @@ def build_pkg_from_directory(
                     if progress_callback:
                         progress_callback(1, 1)
                     return True
+                if require_fast_packager:
+                    raise RuntimeError("Rust packager finished without creating the output PKG.")
             except Exception as ex:
+                if require_fast_packager:
+                    raise
                 print(f"Fast packager unavailable; falling back to Python packager: {ex}")
+        elif require_fast_packager:
+            raise RuntimeError("Rust packager is required but prefer_fast_packager is disabled.")
+
+        if require_fast_packager:
+            packager = _find_fast_packager()
+            if not packager:
+                raise RuntimeError("Rust packager not found at tools/HW2Packager/hw2pkg.exe.")
 
         allowed_paths = _manifest_filter(source_dir)
         package_root = _package_source_root(source_dir, allowed_paths)

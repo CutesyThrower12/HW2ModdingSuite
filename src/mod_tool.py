@@ -188,6 +188,9 @@ if "--particle-editor" in sys.argv:
 if "--player-colors-editor" in sys.argv:
     from player_colors_pyside import main as _player_colors_editor_main
     raise SystemExit(_player_colors_editor_main())
+if "--ai-editor" in sys.argv:
+    from hw2_ai_editor.main import main as _ai_editor_main
+    raise SystemExit(_ai_editor_main())
 if not hasattr(flet, "icons"):
     class _Icons:
         def __getattr__(self, name: str) -> str:
@@ -774,7 +777,7 @@ def main(page: Page):
 
                 # Layout: hero full-width, then two-column content (left: steps, right: presets + preview)
                 left_column = Column([
-                    Column([Text("Workflow Overview", size=18, weight="bold"), Text("Follow these steps to create, package, and publish a custom unit for Halo Wars 2.", color="white70")], spacing=6),
+                    Column([Text("Workflow Overview", size=18, weight="bold"), Text("Follow these steps to create, package, and publish a custom unit for Halo Wars 2.", color="#AAB8CA")], spacing=6),
                     Divider(),
                     Column(card_items, spacing=12, expand=True)
                 ], expand=True, spacing=12)
@@ -1338,18 +1341,38 @@ def main(page: Page):
                 compile_progress_label = Text("Idle", size=12)
                 launch_after_checkbox = Checkbox(label="Launch Halo Wars 2 after compile", value=False)
                 include_loose_xml_checkbox = Checkbox(label="Include loose editable .xml files in package", value=False)
-                ancilla_output = TextField(label="Ancilla Output", multiline=True, min_lines=8, max_lines=20, width=900, bgcolor=OUTPUT_BG)
+                ancilla_output = TextField(label="Compile Log", multiline=True, min_lines=8, max_lines=20, width=900, bgcolor=OUTPUT_BG)
 
                 def package_directory_to_pkg(src_dir, dest_pkg, progress_callback=None, include_loose_xml=False):
                     try:
-                        from Modules.pkg_builder import build_pkg_from_directory
-                        return build_pkg_from_directory(src_dir, dest_pkg, progress_callback, include_loose_xml=include_loose_xml)
+                        from Modules.pkg_builder import run_fast_packager_report
+                        report = run_fast_packager_report(
+                            src_dir,
+                            dest_pkg,
+                            include_loose_xml=include_loose_xml,
+                        )
+                        if progress_callback and report.get("ok"):
+                            progress_callback(1, 1)
+                        command = report.get("command") or []
+                        lines = [
+                            f"Rust packager: {report.get('packager') or 'not found'}",
+                            f"Command: {' '.join(command) if command else 'n/a'}",
+                            f"Exit code: {report.get('returncode')}",
+                            f"Output PKG: {dest_pkg}",
+                            f"Output exists: {report.get('output_exists')}",
+                            f"Output size: {report.get('output_size')} bytes",
+                        ]
+                        if report.get("stdout"):
+                            lines += ["stdout:", str(report.get("stdout"))]
+                        if report.get("stderr"):
+                            lines += ["stderr:", str(report.get("stderr"))]
+                        return bool(report.get("ok")), "\n".join(lines)
                     except Exception as ex:
-                        print(f"Error in package_directory_to_pkg: {ex}")
-                        return False
+                        return False, f"Rust packager failed: {ex}"
 
                 async def run_ancilla_on_directory(path):
-                    ancilla_output.value = ""
+                    if not ancilla_output.value:
+                        ancilla_output.value = ""
                     page.update()
 
                     ancilla_exec = local_ancilla
@@ -1480,14 +1503,23 @@ def main(page: Page):
                         page.update()
                         return
 
+                    compile_root = os.path.abspath(dir_path)
+                    selected_data_folder = os.path.basename(os.path.normpath(compile_root)).lower() == "data"
+                    if selected_data_folder:
+                        compile_root = os.path.dirname(compile_root)
+
                     # 0) Run Ancilla conversion on source directory
                     compile_progress_label.value = "Running Ancilla conversion..."
                     compile_progress_bar.value = 0
-                    ancilla_output.value = ""
+                    ancilla_output.value = (
+                        f"Selected data folder; packaging parent mod folder: {compile_root}\n"
+                        if selected_data_folder
+                        else ""
+                    )
                     page.update()
 
                     try:
-                        ok_ancilla = await run_ancilla_on_directory(dir_path)
+                        ok_ancilla = await run_ancilla_on_directory(compile_root)
                     except Exception as ex:
                         ok_ancilla = False
                         ancilla_output.value += f"Ancilla run failed: {ex}\n"
@@ -1501,8 +1533,8 @@ def main(page: Page):
                         return
 
                     # Destination .pkg next to directory
-                    base_name = os.path.basename(os.path.normpath(dir_path))
-                    dest_pkg = os.path.join(os.path.dirname(dir_path), f"{base_name}.pkg")
+                    base_name = os.path.basename(os.path.normpath(compile_root))
+                    dest_pkg = os.path.join(os.path.dirname(compile_root), f"{base_name}.pkg")
 
                     def _progress_tick(completed, total):
                         try:
@@ -1512,20 +1544,24 @@ def main(page: Page):
                         except Exception:
                             pass
 
-                    # 1) Package directory into .pkg (zip)
-                    compile_progress_label.value = "Packaging..."
+                    # 1) Package directory into .pkg using the Rust packager.
+                    compile_progress_label.value = "Packaging with Rust hw2pkg..."
                     compile_progress_bar.value = 0
+                    ancilla_output.value = (ancilla_output.value or "") + "\nPackaging with Rust hw2pkg..."
                     page.update()
 
                     try:
                         loop = asyncio.get_running_loop()
-                        ok = await loop.run_in_executor(None, package_directory_to_pkg, dir_path, dest_pkg, _progress_tick, bool(include_loose_xml_checkbox.value))
+                        ok, package_message = await loop.run_in_executor(None, package_directory_to_pkg, compile_root, dest_pkg, _progress_tick, bool(include_loose_xml_checkbox.value))
                     except Exception:
-                        ok = package_directory_to_pkg(dir_path, dest_pkg, _progress_tick, bool(include_loose_xml_checkbox.value))
+                        ok, package_message = package_directory_to_pkg(compile_root, dest_pkg, _progress_tick, bool(include_loose_xml_checkbox.value))
+
+                    ancilla_output.value = (ancilla_output.value or "") + f"\n{package_message}"
+                    page.update()
 
                     if not ok or not os.path.exists(dest_pkg):
-                        page.snack_bar = SnackBar(Text("Packaging failed."), open=True)
-                        compile_progress_label.value = "Packaging failed"
+                        page.snack_bar = SnackBar(Text("Rust packaging failed. Check Compile Log."), open=True)
+                        compile_progress_label.value = "Rust packaging failed"
                         page.update()
                         return
 
@@ -1964,7 +2000,7 @@ def main(page: Page):
             convert_evolved_content = Container(
                 Column([
                     Text("Ancilla", size=20, weight="bold"),
-                    Text("Converts editable .XML files back into .XMB format readable by Halo Wars 2.", color="white70"),
+                    Text("Converts editable .XML files back into .XMB format readable by Halo Wars 2.", color="#AAB8CA"),
                     Row([tools_path_field, browse_button], alignment="center"),
                     Divider(),
                     Row([btn_convert_evolved], alignment="center"),
@@ -2033,10 +2069,40 @@ def main(page: Page):
                         pass
                 page.update()
 
+            def launch_ai_editor(e=None):
+                """Launch the PySide HW2 AI Strategy Editor as a separate process."""
+                try:
+                    editor_path = os.path.join(SRC_DIR, "hw2_ai_editor", "main.py")
+                    if not getattr(sys, "frozen", False) and not os.path.exists(editor_path):
+                        page.snack_bar = SnackBar(Text("HW2 AI Editor script not found."), open=True)
+                        page.update()
+                        return
+
+                    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+                    if getattr(sys, "frozen", False):
+                        subprocess.Popen(
+                            [sys.executable, "--ai-editor"],
+                            cwd=BASE_DIR,
+                            creationflags=creationflags,
+                        )
+                    else:
+                        subprocess.Popen(
+                            [sys.executable or "python", "-m", "hw2_ai_editor.main"],
+                            cwd=SRC_DIR,
+                            creationflags=creationflags,
+                        )
+                    page.snack_bar = SnackBar(Text("Launched HW2 AI Strategy Editor."), open=True)
+                except Exception as ex:
+                    try:
+                        page.snack_bar = SnackBar(Text(f"Failed to launch HW2 AI Strategy Editor: {ex}"), open=True)
+                    except Exception:
+                        pass
+                page.update()
+
             phx_content = Container(
                 Column([
                     Text("Phoenix Tools", size=20, weight="bold"),
-                    Text("This is the Phoenix tool — allows converting .XMB to .XML via drag-and-drop using the Phoenix GUI.", color="white70"),
+                    Text("This is the Phoenix tool — allows converting .XMB to .XML via drag-and-drop using the Phoenix GUI.", color="#AAB8CA"),
                     Divider(),
                     Button("Launch Phoenix GUI", on_click=launch_phoenix_gui),
                     Divider(),
@@ -2350,6 +2416,7 @@ def main(page: Page):
 
             tools_secondary = Row([
                 action_card("CRC32 Calculator", "Compute CRC-32 for files in hex and decimal formats.", "Open", lambda ev: set_top_content(crc_content), TEAL),
+                action_card("AI Strategy Editor", "Edit Halo Wars 2 AI strategy tables, missions, directives, and validation.", "Launch", launch_ai_editor, ACCENT_BLUE),
             ], spacing=16, expand=True)
 
             tools_list = Column([

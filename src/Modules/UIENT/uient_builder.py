@@ -15,8 +15,8 @@ from flet import (
 )
 
 # Theme colors (match existing look)
-TEAL = "#a0cafd"
-GRAY = "#2b2b2b"
+TEAL = "#75D8FF"
+GRAY = "#0B1018"
 
 def uient_builder_tab(page):
     """
@@ -37,7 +37,7 @@ def uient_builder_tab(page):
     # (Leader power has been moved to its own workflow/module: Modules/UIENT/leader_power_tab.py)
 
     # ---------- Output ----------
-    output_box = TextField(label="Generated UIENT XML", multiline=True, min_lines=20, max_lines=40, bgcolor="#111111", width=900)
+    output_box = TextField(label="Generated UIENT XML", multiline=True, min_lines=20, max_lines=40, bgcolor="#080D14", width=900)
 
     def xml_escape_lines(s: str):
         if s is None:

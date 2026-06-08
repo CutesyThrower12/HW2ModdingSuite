@@ -4,8 +4,8 @@ from flet import (
 )
 
 def leader_power_tab(page):
-    TEAL = "#a0cafd"
-    GRAY = "#2b2b2b"
+    TEAL = "#75D8FF"
+    GRAY = "#0B1018"
 
     # Controls (kept from original UIENT leader power implementation)
     lp_kind_value = "Active"
@@ -66,7 +66,7 @@ def leader_power_tab(page):
     update_tier_display(None)
 
     # output box
-    output_box = TextField(label="Generated UIENT XML", multiline=True, min_lines=10, max_lines=20, bgcolor="#111111", expand=True)
+    output_box = TextField(label="Generated UIENT XML", multiline=True, min_lines=10, max_lines=20, bgcolor="#080D14", expand=True)
 
     def xml_escape_lines(s: str):
         if s is None:

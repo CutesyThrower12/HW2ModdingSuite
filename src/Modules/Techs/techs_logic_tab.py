@@ -8,8 +8,8 @@ from flet import (
 # Techs Logic Builder
 # ------------------------------------------------------------
 def techs_logic_tab(page):
-    TEAL = "#a0cafd"
-    GRAY = "#2b2b2b"
+    TEAL = "#75D8FF"
+    GRAY = "#0B1018"
 
     # ---------------------------
     # Helper: Snackbar
@@ -83,7 +83,7 @@ def techs_logic_tab(page):
         multiline=True,
         min_lines=12,
         max_lines=20,
-        bgcolor="#111111",
+        bgcolor="#080D14",
         width=900
     )
 

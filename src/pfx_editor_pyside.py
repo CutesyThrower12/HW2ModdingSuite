@@ -192,6 +192,8 @@ class ColorEntry:
     value_start: int | None
     value_end: int | None
     current_value: int | None
+    block_start: int
+    block_end: int
 
     @property
     def is_editable(self) -> bool:
@@ -218,6 +220,17 @@ class PropertyEntry:
     @property
     def is_editable(self) -> bool:
         return self.kind in ("bool", "number")
+
+
+@dataclass
+class EmitterScaleEntry:
+    index: int
+    name: str
+    active: str
+    start: int
+    end: int
+    scale_count: int
+    multiplier: float = 1.0
 
 
 def int_to_rgb(value: int) -> tuple[int, int, int]:
@@ -278,6 +291,34 @@ def find_emitter_contexts(text: str) -> list[tuple[int, int, str, str]]:
         end = match.end() + end_match.end() if end_match else len(text)
         contexts.append((match.start(), end, attrs.get("Name", "Unnamed emitter"), attrs.get("Active", "")))
     return contexts
+
+
+def find_emitter_scale_entries(text: str) -> list[EmitterScaleEntry]:
+    entries: list[EmitterScaleEntry] = []
+    for index, (start, end, name, active) in enumerate(find_emitter_contexts(text), start=1):
+        block = text[start:end]
+        scale_count = 0
+        in_scale_data = False
+        for line in block.splitlines():
+            stripped = line.strip()
+            if "<ScaleData" in stripped:
+                in_scale_data = True
+            if in_scale_data and "<UniformValue>" in line and "</UniformValue>" in line:
+                scale_count += 1
+            if "</ScaleData>" in stripped:
+                in_scale_data = False
+        if scale_count:
+            entries.append(
+                EmitterScaleEntry(
+                    index=index,
+                    name=name or f"Emitter {index}",
+                    active=active,
+                    start=start,
+                    end=end,
+                    scale_count=scale_count,
+                )
+            )
+    return entries
 
 
 def context_for_position(
@@ -557,6 +598,8 @@ def find_color_entries(text: str) -> list[ColorEntry]:
                     value_start=value_start,
                     value_end=value_end,
                     current_value=original_value,
+                    block_start=block_match.start(),
+                    block_end=block_match.end(),
                 )
             )
     return entries
@@ -683,6 +726,8 @@ def parse_particle_entries(text: str) -> tuple[list[ColorEntry], list[PropertyEn
                     value_start=value_start,
                     value_end=value_end,
                     current_value=original_value,
+                    block_start=block_start,
+                    block_end=block_match.end(),
                 )
             )
 
@@ -723,12 +768,30 @@ def apply_particle_edits(
     text: str,
     color_entries: list[ColorEntry],
     property_entries: list[PropertyEntry],
-) -> tuple[str, int, int]:
+    deleted_group_ids: set[int] | None = None,
+) -> tuple[str, int, int, int]:
     replacements: list[tuple[int, int, str]] = []
     color_changed = 0
     property_changed = 0
+    deleted_group_ids = deleted_group_ids or set()
+    deleted_spans: dict[int, tuple[int, int]] = {}
 
     for entry in color_entries:
+        if entry.group_id in deleted_group_ids:
+            deleted_spans.setdefault(entry.group_id, (entry.block_start, entry.block_end))
+
+    for group_id, (start, end) in deleted_spans.items():
+        line_start = text.rfind("\n", 0, start) + 1
+        line_end = text.find("\n", end)
+        if line_end != -1:
+            end = line_end + 1
+            if text[line_start:start].strip() == "":
+                start = line_start
+        replacements.append((start, end, ""))
+
+    for entry in color_entries:
+        if entry.group_id in deleted_group_ids:
+            continue
         if not entry.is_editable:
             continue
         if entry.value_start is None or entry.value_end is None:
@@ -739,6 +802,8 @@ def apply_particle_edits(
         color_changed += 1
 
     for entry in property_entries:
+        if entry.color_group_id in deleted_group_ids:
+            continue
         if not entry.is_editable:
             continue
         if entry.current_value == entry.original_value:
@@ -748,56 +813,78 @@ def apply_particle_edits(
 
     for start, end, value in sorted(replacements, reverse=True):
         text = text[:start] + value + text[end:]
-    return text, color_changed, property_changed
+    return text, color_changed, property_changed, len(deleted_spans)
 
 
-def scale_uniform_values_in_text(text: str, multiplier: float) -> tuple[str, int]:
-    lines = text.splitlines(keepends=True)
-    in_scale_data = False
-    result_lines: list[str] = []
-    changed = 0
+def scale_uniform_values_in_text(
+    text: str,
+    multiplier: float,
+    emitter_scales: list[EmitterScaleEntry] | None = None,
+) -> tuple[str, int]:
+    emitter_scales = emitter_scales or []
+    replacements: list[tuple[int, int, str]] = []
 
-    for line in lines:
-        stripped = line.strip()
+    for scale_match in re.finditer(r"<ScaleData\b[^>]*>.*?</ScaleData>", text, re.IGNORECASE | re.DOTALL):
+        scale_block = scale_match.group(0)
+        for value_match in re.finditer(r"<UniformValue>(.*?)</UniformValue>", scale_block, re.IGNORECASE | re.DOTALL):
+            raw_value = value_match.group(1)
+            leading_ws = len(raw_value) - len(raw_value.lstrip())
+            trailing_ws = len(raw_value) - len(raw_value.rstrip())
+            number_str = raw_value.strip()
+            try:
+                value = float(number_str)
+            except ValueError:
+                continue
 
-        if "<ScaleData" in stripped:
-            in_scale_data = True
+            absolute_value_start = scale_match.start() + value_match.start(1) + leading_ws
+            absolute_value_end = scale_match.start() + value_match.end(1) - trailing_ws
+            local_multiplier = multiplier
+            for emitter in emitter_scales:
+                if emitter.start <= absolute_value_start < emitter.end:
+                    local_multiplier *= emitter.multiplier
+                    break
 
-        new_line, did_change = _process_uniform_line(line, in_scale_data, multiplier)
-        changed += int(did_change)
-        result_lines.append(new_line)
+            new_value = value * local_multiplier
+            if number_str.isdigit() or (number_str.startswith("-") and number_str[1:].isdigit()):
+                new_number_str = str(int(round(new_value)))
+            else:
+                new_number_str = f"{new_value:.9g}"
+            if new_number_str != number_str:
+                replacements.append((absolute_value_start, absolute_value_end, new_number_str))
 
-        if "</ScaleData>" in stripped:
-            in_scale_data = False
+    for start, end, value in sorted(replacements, reverse=True):
+        text = text[:start] + value + text[end:]
 
-    return "".join(result_lines), changed
+    return text, len(replacements)
 
 
 def _process_uniform_line(line: str, in_scale_data: bool, multiplier: float) -> tuple[str, bool]:
     if not in_scale_data:
         return line, False
 
-    start_tag = "<UniformValue>"
-    end_tag = "</UniformValue>"
-    start_idx = line.find(start_tag)
-    end_idx = line.find(end_tag)
-    if start_idx == -1 or end_idx == -1:
-        return line, False
+    changed = False
 
-    start_idx += len(start_tag)
-    number_str = line[start_idx:end_idx].strip()
-    try:
-        value = float(number_str)
-    except ValueError:
-        return line, False
+    def replace(match: re.Match) -> str:
+        nonlocal changed
+        raw_value = match.group(1)
+        leading_ws = raw_value[: len(raw_value) - len(raw_value.lstrip())]
+        trailing_ws = raw_value[len(raw_value.rstrip()) :]
+        number_str = raw_value.strip()
+        try:
+            value = float(number_str)
+        except ValueError:
+            return match.group(0)
 
-    new_value = value * multiplier
-    if number_str.isdigit() or (number_str.startswith("-") and number_str[1:].isdigit()):
-        new_number_str = str(int(round(new_value)))
-    else:
-        new_number_str = f"{new_value:.9g}"
+        new_value = value * multiplier
+        if number_str.isdigit() or (number_str.startswith("-") and number_str[1:].isdigit()):
+            new_number_str = str(int(round(new_value)))
+        else:
+            new_number_str = f"{new_value:.9g}"
+        changed = changed or new_number_str != number_str
+        return f"<UniformValue>{leading_ws}{new_number_str}{trailing_ws}</UniformValue>"
 
-    return line[:start_idx] + new_number_str + line[end_idx:], new_number_str != number_str
+    new_line = re.sub(r"<UniformValue>(.*?)</UniformValue>", replace, line)
+    return new_line, changed
 
 
 def entry_hex(entry: ColorEntry) -> str:
@@ -974,11 +1061,12 @@ class ColorRow(QFrame):
 
 
 class ColorGroup(QFrame):
-    def __init__(self, entries: list[ColorEntry], property_entries: list[PropertyEntry], on_changed):
+    def __init__(self, entries: list[ColorEntry], property_entries: list[PropertyEntry], on_changed, on_delete):
         super().__init__()
         self.entries = entries
         self.property_entries = property_entries
         self.on_changed = on_changed
+        self.on_delete = on_delete
         self.setObjectName("ColorGroupCard")
         self.setFrameShape(QFrame.StyledPanel)
 
@@ -1007,6 +1095,11 @@ class ColorGroup(QFrame):
         count_label = QLabel(self.summary_text())
         count_label.setObjectName("ChipLabel")
         header.addWidget(count_label)
+
+        delete_btn = QPushButton("Delete Group")
+        delete_btn.setToolTip("Remove this ColorData/ColourData particle group from the saved PFX.")
+        delete_btn.clicked.connect(self.request_delete)
+        header.addWidget(delete_btn)
         layout.addLayout(header)
 
         visual = QHBoxLayout()
@@ -1124,6 +1217,11 @@ class ColorGroup(QFrame):
         self.update_overview()
         self.on_changed()
 
+    def request_delete(self):
+        if not self.entries:
+            return
+        self.on_delete(self.entries[0].group_id, group_title(self.entries))
+
 
 class ParticleEditor(QMainWindow):
     def __init__(self):
@@ -1138,8 +1236,11 @@ class ParticleEditor(QMainWindow):
         self.color_entries: list[ColorEntry] = []
         self.color_groups: list[list[ColorEntry]] = []
         self.color_group_search: dict[int, str] = {}
+        self.deleted_group_ids: set[int] = set()
         self.editable_color_count = 0
         self.property_entries: list[PropertyEntry] = []
+        self.emitter_scale_entries: list[EmitterScaleEntry] = []
+        self.emitter_scale_spins: dict[int, QDoubleSpinBox] = {}
         self.has_color_edits = False
         self.has_property_edits = False
         self.color_filter_timer = QTimer(self)
@@ -1249,7 +1350,7 @@ class ParticleEditor(QMainWindow):
         title_stack = QVBoxLayout()
         title = QLabel("Scale Utility")
         title.setObjectName("TitleLabel")
-        subtitle = QLabel("Scale particle UniformValue entries inside ScaleData blocks only.")
+        subtitle = QLabel("Scale all particle size curves, or target individual emitters inside ScaleData blocks.")
         subtitle.setObjectName("SubtleLabel")
         title_stack.addWidget(title)
         title_stack.addWidget(subtitle)
@@ -1266,7 +1367,7 @@ class ParticleEditor(QMainWindow):
         layout.addWidget(toolbar)
 
         form = QHBoxLayout()
-        form.addWidget(QLabel("Scale multiplier"))
+        form.addWidget(QLabel("Overall scale multiplier"))
         self.scale_spin = QDoubleSpinBox()
         self.scale_spin.setDecimals(4)
         self.scale_spin.setRange(-1000000.0, 1000000.0)
@@ -1276,12 +1377,25 @@ class ParticleEditor(QMainWindow):
         form.addStretch(1)
         layout.addLayout(form)
 
+        emitter_label = QLabel("Per-emitter scale multipliers")
+        emitter_label.setStyleSheet("font-weight: 800; color: #F4F7FB; padding-top: 10px;")
+        layout.addWidget(emitter_label)
+
+        self.emitter_scale_scroll = QScrollArea()
+        self.emitter_scale_scroll.setWidgetResizable(True)
+        self.emitter_scale_container = QWidget()
+        self.emitter_scale_layout = QVBoxLayout(self.emitter_scale_container)
+        self.emitter_scale_layout.setContentsMargins(0, 0, 0, 0)
+        self.emitter_scale_layout.setSpacing(8)
+        self.emitter_scale_layout.addStretch(1)
+        self.emitter_scale_scroll.setWidget(self.emitter_scale_container)
+        layout.addWidget(self.emitter_scale_scroll, 1)
+
         self.scale_status = QLabel(
-            "The scale tool only changes <UniformValue> values while inside <ScaleData> blocks."
+            "Overall scale affects every <ScaleData> UniformValue. Per-emitter scale is multiplied on top for that emitter only."
         )
         self.scale_status.setWordWrap(True)
         layout.addWidget(self.scale_status)
-        layout.addStretch(1)
 
     def open_file(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -1305,19 +1419,63 @@ class ParticleEditor(QMainWindow):
         self.encoding = encoding
         self.original_text = text
         self.color_entries, self.property_entries = parse_particle_entries(text)
+        self.emitter_scale_entries = find_emitter_scale_entries(text)
         group_by_id: dict[int, list[ColorEntry]] = {}
         for entry in self.color_entries:
             group_by_id.setdefault(entry.group_id, []).append(entry)
         self.color_groups = list(group_by_id.values())
         self.color_group_search = {group[0].group_id: color_group_search_text(group) for group in self.color_groups if group}
         self.editable_color_count = sum(1 for entry in self.color_entries if entry.is_editable)
+        self.deleted_group_ids.clear()
         self.has_color_edits = False
         self.has_property_edits = False
         self.file_label.setText(os.path.basename(path))
         self.scale_status.setText(
-            "Ready. Scaling will only change <UniformValue> values while inside <ScaleData> blocks."
+            f"Ready. Found {len(self.emitter_scale_entries)} emitter(s) with ScaleData UniformValue entries."
         )
+        self.populate_emitter_scale_controls()
         self.populate_colors()
+
+    def populate_emitter_scale_controls(self):
+        if not hasattr(self, "emitter_scale_layout"):
+            return
+        while self.emitter_scale_layout.count() > 0:
+            item = self.emitter_scale_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        self.emitter_scale_spins.clear()
+
+        if not self.emitter_scale_entries:
+            empty = QLabel("No emitter ScaleData UniformValue entries found in this file.")
+            empty.setObjectName("SubtleLabel")
+            self.emitter_scale_layout.addWidget(empty)
+            self.emitter_scale_layout.addStretch(1)
+            return
+
+        for entry in self.emitter_scale_entries:
+            row = QFrame()
+            row.setObjectName("InfoPanel")
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(10, 8, 10, 8)
+            title = QLabel(entry.name)
+            title.setStyleSheet("font-weight: 800;")
+            meta = QLabel(f"{entry.scale_count} scale value(s)" + (f" | active={entry.active}" if entry.active else ""))
+            meta.setObjectName("SubtleLabel")
+            row_layout.addWidget(title, 1)
+            row_layout.addWidget(meta)
+            spin = QDoubleSpinBox()
+            spin.setDecimals(4)
+            spin.setRange(-1000000.0, 1000000.0)
+            spin.setSingleStep(0.1)
+            spin.setValue(entry.multiplier)
+            spin.setToolTip("Multiplies ScaleData UniformValue entries inside this emitter only.")
+            spin.valueChanged.connect(lambda value, e=entry: setattr(e, "multiplier", float(value)))
+            row_layout.addWidget(spin)
+            self.emitter_scale_spins[entry.index] = spin
+            self.emitter_scale_layout.addWidget(row)
+
+        self.emitter_scale_layout.addStretch(1)
 
     def schedule_populate_colors(self):
         self.color_filter_timer.start()
@@ -1337,6 +1495,8 @@ class ParticleEditor(QMainWindow):
         last_emitter = None
 
         for group in self.color_groups:
+            if group and group[0].group_id in self.deleted_group_ids:
+                continue
             visible_group = [entry for entry in group if not editable_only or entry.is_editable]
             if not visible_group:
                 continue
@@ -1351,9 +1511,23 @@ class ParticleEditor(QMainWindow):
                 header.setObjectName("EmitterHeader")
                 self.color_layout.addWidget(header)
                 last_emitter = lead.emitter_name
-            self.color_layout.addWidget(ColorGroup(visible_group, self.property_entries, self.mark_particle_edited))
+            self.color_layout.addWidget(
+                ColorGroup(
+                    visible_group,
+                    self.property_entries,
+                    self.mark_particle_edited,
+                    self.delete_color_group,
+                )
+            )
             shown_count += 1
             shown_values += len(visible_group)
+
+        active_group_total = len(self.color_groups) - len(self.deleted_group_ids)
+        active_color_total = sum(
+            len(group)
+            for group in self.color_groups
+            if group and group[0].group_id not in self.deleted_group_ids
+        )
 
         if not self.color_entries:
             self.color_layout.addWidget(QLabel("No editable ColorData or ColourData RGB-int values found."))
@@ -1363,7 +1537,7 @@ class ParticleEditor(QMainWindow):
             effect = self.color_entries[0].effect_name
             prefix = f"{effect} | " if effect else ""
             summary = QLabel(
-                f"{prefix}showing {shown_count}/{len(self.color_groups)} color groups and {shown_values}/{len(self.color_entries)} color values; {self.editable_color_count} RGB-int values are editable."
+                f"{prefix}showing {shown_count}/{active_group_total} color groups and {shown_values}/{active_color_total} color values; {self.editable_color_count} RGB-int values are editable."
             )
             summary.setObjectName("SubtleLabel")
             self.color_layout.insertWidget(0, summary)
@@ -1371,9 +1545,25 @@ class ParticleEditor(QMainWindow):
         self.color_layout.addStretch(1)
         self.color_container.setUpdatesEnabled(True)
         if hasattr(self, "group_chip"):
-            self.group_chip.setText(f"{shown_count}/{len(self.color_groups)} groups")
-            self.color_chip.setText(f"{shown_values}/{len(self.color_entries)} colors")
+            self.group_chip.setText(f"{shown_count}/{active_group_total} groups")
+            self.color_chip.setText(f"{shown_values}/{active_color_total} colors")
             self.quick_chip.setText(f"{len(self.property_entries)} quick controls")
+
+    def delete_color_group(self, group_id: int, title: str):
+        if group_id in self.deleted_group_ids:
+            return
+        confirm = QMessageBox.question(
+            self,
+            "Delete particle group?",
+            f"Delete this particle color group from the saved PFX?\n\n{title}\n\nThe source file is not changed until you save.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if confirm != QMessageBox.Yes:
+            return
+        self.deleted_group_ids.add(group_id)
+        self.has_color_edits = True
+        self.populate_colors()
 
     def mark_color_edited(self):
         self.has_color_edits = True
@@ -1387,10 +1577,11 @@ class ParticleEditor(QMainWindow):
             QMessageBox.warning(self, "No file", "Open a .pfx file first.")
             return
 
-        modified_text, color_changed, property_changed = apply_particle_edits(
+        modified_text, color_changed, property_changed, deleted_count = apply_particle_edits(
             self.original_text,
             self.color_entries,
             self.property_entries,
+            self.deleted_group_ids,
         )
         initial = self._default_save_name("_edited")
         path, _ = QFileDialog.getSaveFileName(
@@ -1411,7 +1602,7 @@ class ParticleEditor(QMainWindow):
         QMessageBox.information(
             self,
             "Saved",
-            f"Saved {color_changed} color change(s) and {property_changed} property change(s).\nNo other XML text was rewritten.",
+            f"Saved {color_changed} color change(s), {property_changed} property change(s), and {deleted_count} deleted group(s).\nNo other XML text was rewritten.",
         )
 
     def save_scaled_file(self):
@@ -1420,7 +1611,7 @@ class ParticleEditor(QMainWindow):
             return
 
         multiplier = float(self.scale_spin.value())
-        modified_text, changed = scale_uniform_values_in_text(self.original_text, multiplier)
+        modified_text, changed = scale_uniform_values_in_text(self.original_text, multiplier, self.emitter_scale_entries)
         initial = self._default_save_name("_scaled")
         path, _ = QFileDialog.getSaveFileName(
             self,
@@ -1437,13 +1628,19 @@ class ParticleEditor(QMainWindow):
             QMessageBox.critical(self, "Save failed", f"Failed to save file:\n{exc}")
             return
 
+        emitter_overrides = [entry for entry in self.emitter_scale_entries if abs(entry.multiplier - 1.0) > 0.0000001]
+        scope_text = (
+            f" Overall multiplier {multiplier:g}; {len(emitter_overrides)} emitter override(s) applied."
+            if emitter_overrides
+            else f" Overall multiplier {multiplier:g}; no emitter overrides."
+        )
         self.scale_status.setText(
-            f"Saved {changed} scaled UniformValue change(s). Only values inside ScaleData blocks were touched."
+            f"Saved {changed} scaled UniformValue change(s).{scope_text}"
         )
         QMessageBox.information(
             self,
             "Saved",
-            f"Saved {changed} scaled UniformValue change(s).\nOnly <UniformValue> inside <ScaleData> blocks was changed.",
+            f"Saved {changed} scaled UniformValue change(s).\nOnly <UniformValue> inside <ScaleData> blocks was changed.\n{scope_text}",
         )
 
     def _default_save_name(self, suffix: str) -> str:
