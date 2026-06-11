@@ -202,6 +202,7 @@ import inspect
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 import re
+import shutil
 import time
 from Modules.shared_styles_fix import (
     TEAL, ACCENT_BLUE, APP_BG, PANEL_BG, CARD_BG, CARD_BG_ALT, SIDEBAR_BG,
@@ -899,6 +900,8 @@ def main(page: Page):
 
                 pkg_file_field = TextField(label="Mod Directory", width=700, bgcolor=INPUT_BG)
                 pkg_browse_btn = Button("Browse...", on_click=lambda ev: browse_pkg_file())
+                loose_data_field = TextField(label="External loose data folder (optional)", width=700, bgcolor=INPUT_BG)
+                loose_data_browse_btn = Button("Browse...", on_click=lambda ev: browse_loose_data_folder())
                 pkg_crc_field = TextField(label="CRC (decimal)", width=300, bgcolor=OUTPUT_BG)
                 pkg_hex_field = TextField(label="CRC (hex)", width=300, bgcolor=OUTPUT_BG)
                 pkg_size_field = TextField(label="Size (bytes)", width=300, bgcolor=OUTPUT_BG)
@@ -907,7 +910,16 @@ def main(page: Page):
                 published_utc_str_field = TextField(label="published_utc_str", width=600, bgcolor=OUTPUT_BG)
                 manifest_output = TextField(label="Manifest XML", multiline=True, min_lines=6, max_lines=20, width=900, bgcolor=OUTPUT_BG)
 
-                def browse_pkg_file():
+                def xml_attr(value):
+                    return (
+                        str(value)
+                        .replace("&", "&amp;")
+                        .replace('"', "&quot;")
+                        .replace("<", "&lt;")
+                        .replace(">", "&gt;")
+                    )
+
+                def pick_directory_dialog():
                     try:
                         root = _tk.Tk()
                         try:
@@ -922,8 +934,96 @@ def main(page: Page):
                         except Exception:
                             pass
                         root.destroy()
+                        return path or ""
                     except Exception:
-                        path = ""
+                        return ""
+
+                def resolve_loose_data_source(path):
+                    if not path:
+                        return None
+                    source = os.path.abspath(os.path.expandvars(path.strip()))
+                    if not os.path.isdir(source):
+                        return None
+                    if os.path.basename(os.path.normpath(source)).lower() == "data":
+                        return source
+                    nested_data = os.path.join(source, "data")
+                    if os.path.isdir(nested_data):
+                        return nested_data
+                    return source
+
+                def iter_loose_data_files(path):
+                    data_root = resolve_loose_data_source(path)
+                    if not data_root:
+                        return []
+                    files = []
+                    for root_dir, dirs, names in os.walk(data_root):
+                        dirs[:] = [d for d in dirs if d.lower() not in {".git", "__pycache__"}]
+                        for name in names:
+                            if name.lower() in {"thumbs.db", "desktop.ini"}:
+                                continue
+                            full = os.path.join(root_dir, name)
+                            rel = os.path.relpath(full, data_root).replace("/", "\\")
+                            manifest_path = f"data\\{rel}"
+                            files.append((full, manifest_path))
+                    files.sort(key=lambda item: item[1].lower())
+                    return files
+
+                def file_manifest_entry(file_path, manifest_path):
+                    try:
+                        crc_val = int(crc32_file_fast(file_path))
+                    except Exception:
+                        with open(file_path, "rb") as fh:
+                            crc_val = int(crc32_bytes(fh.read()))
+                    try:
+                        size = os.path.getsize(file_path)
+                    except Exception:
+                        size = 0
+                    try:
+                        file_time = int(os.path.getmtime(file_path))
+                    except Exception:
+                        file_time = 0
+                    safe_path = xml_attr(manifest_path)
+                    return f'\t<file action="replace" crc32="{crc_val}" new="{safe_path}" old="{safe_path}" size="{size}" time="{file_time}" version="1" />'
+
+                def build_manifest_xml(pkg_path, loose_data_path="", published=None):
+                    if published is None:
+                        try:
+                            published = int(time.time())
+                        except Exception:
+                            published = 0
+                    try:
+                        published_str = time.strftime("%a %b %d %H:%M:%S UTC %Y", time.gmtime(published))
+                    except Exception:
+                        published_str = ""
+
+                    lines = [f'<manifest published_utc="{published}" published_utc_str="{xml_attr(published_str)}">']
+                    if pkg_path:
+                        pkg_name = os.path.basename(pkg_path)
+                        lines.append(file_manifest_entry(pkg_path, pkg_name))
+                    for full, manifest_path in iter_loose_data_files(loose_data_path):
+                        lines.append(file_manifest_entry(full, manifest_path))
+                    lines.append("</manifest>")
+                    return "\n".join(lines)
+
+                def copy_loose_data_to_gts(loose_data_path, gts_path):
+                    data_root = resolve_loose_data_source(loose_data_path)
+                    if not data_root:
+                        return 0
+                    copied = 0
+                    dest_data_root = os.path.join(gts_path, "data")
+                    for full, manifest_path in iter_loose_data_files(data_root):
+                        rel_under_data = manifest_path.split("\\", 1)[1] if "\\" in manifest_path else os.path.basename(full)
+                        dest = os.path.join(dest_data_root, *rel_under_data.split("\\"))
+                        os.makedirs(os.path.dirname(dest), exist_ok=True)
+                        try:
+                            shutil.copy2(full, dest)
+                        except Exception:
+                            shutil.copy(full, dest)
+                        copied += 1
+                    return copied
+
+                def browse_pkg_file():
+                    path = pick_directory_dialog()
                     if path:
                         pkg_file_field.value = path
                         # clear PKG-specific fields until compilation runs
@@ -931,6 +1031,13 @@ def main(page: Page):
                         pkg_time_field.value = ""
                         pkg_crc_field.value = ""
                         pkg_hex_field.value = ""
+                        manifest_output.value = ""
+                        page.update()
+
+                def browse_loose_data_folder():
+                    path = pick_directory_dialog()
+                    if path:
+                        loose_data_field.value = path
                         manifest_output.value = ""
                         page.update()
 
@@ -1609,11 +1716,13 @@ def main(page: Page):
                     except Exception:
                         published_str = ""
                     manifest_name = "1_11_2931_2_file_manifest.xml"
-                    xml = []
-                    xml.append(f'<manifest published_utc="{published}" published_utc_str="{published_str}">')
-                    xml.append(f'\t<file action="replace" crc32="{crc_int}" new="{os.path.basename(dest_pkg)}" old="{os.path.basename(dest_pkg)}" size="{pkg_size_field.value}" time="{pkg_time_field.value}" version="1" />')
-                    xml.append('</manifest>')
-                    manifest_output.value = "\n".join(xml)
+                    loose_files = iter_loose_data_files(loose_data_field.value.strip())
+                    manifest_output.value = build_manifest_xml(dest_pkg, loose_data_field.value.strip(), published)
+                    if loose_files:
+                        ancilla_output.value = (ancilla_output.value or "") + f"\nManifest includes {len(loose_files)} loose data file(s)."
+                    else:
+                        ancilla_output.value = (ancilla_output.value or "") + "\nManifest includes package only; no loose data folder selected."
+                    page.update()
 
                     # 4) Export to GTS
                     compile_progress_label.value = "Exporting to GTS..."
@@ -1632,7 +1741,10 @@ def main(page: Page):
                             shutil.copy2(dest_pkg, dest_pkg_path)
                         except Exception:
                             shutil.copy(dest_pkg, dest_pkg_path)
-                        page.snack_bar = SnackBar(Text(f"Exported: {os.path.basename(dest_pkg)} and manifest."), open=True)
+                        loose_copied = copy_loose_data_to_gts(loose_data_field.value.strip(), path)
+                        if loose_copied:
+                            ancilla_output.value = (ancilla_output.value or "") + f"\nCopied {loose_copied} loose data file(s) into GTS\\data."
+                        page.snack_bar = SnackBar(Text(f"Exported: {os.path.basename(dest_pkg)}, manifest, and {loose_copied} loose file(s)."), open=True)
                         page.update()
                     except Exception as ex:
                         page.snack_bar = SnackBar(Text(f"Export failed: {ex}"), open=True)
@@ -1664,6 +1776,8 @@ def main(page: Page):
                 build_tab = Column([
                     Text("Compile Mod Builder", size=20, weight="bold"),
                     Row([pkg_file_field, pkg_browse_btn], alignment="center"),
+                    Row([loose_data_field, loose_data_browse_btn], alignment="center"),
+                    Text("Loose files are copied into GTS\\data and added to the manifest as data\\... entries.", size=12, color=TEXT_MUTED),
                     Row([compile_btn, launch_after_checkbox, include_loose_xml_checkbox], spacing=12),
                     Divider(),
                     compile_progress_label,
