@@ -77,6 +77,7 @@ set "PLAYER_COLORS_EDITOR=%SRC%\player_colors_pyside.py"
 set "AI_EDITOR=%SRC%\hw2_ai_editor\main.py"
 set "TRIGGERSCRIPT_EDITOR=%SRC%\triggerscript_editor.py"
 set "TRIGGERSCRIPT_PARSER=%SRC%\triggerscript_parser.py"
+set "TRIGGERSCRIPT_HELP=%SRC%\triggerscript_help.py"
 set "RUST_PACKAGER_SRC=%PROJECT_ROOT%\src-rust\HW2Packager"
 set "RUST_PACKAGER_OUT=%RUST_PACKAGER_SRC%\target\release\hw2pkg.exe"
 set "RUST_PACKAGER_EXE=%PROJECT_ROOT%\tools\HW2Packager\hw2pkg.exe"
@@ -127,6 +128,11 @@ if not exist "%TRIGGERSCRIPT_EDITOR%" (
 )
 if not exist "%TRIGGERSCRIPT_PARSER%" (
   echo [ERROR] Missing: %TRIGGERSCRIPT_PARSER%
+  pause
+  exit /b 1
+)
+if not exist "%TRIGGERSCRIPT_HELP%" (
+  echo [ERROR] Missing: %TRIGGERSCRIPT_HELP%
   pause
   exit /b 1
 )

@@ -22,6 +22,7 @@ a = Analysis(
         ('src\\player_colors_pyside.py', '.'),
         ('src\\triggerscript_editor.py', '.'),
         ('src\\triggerscript_parser.py', '.'),
+        ('src\\triggerscript_help.py', '.'),
         ('tools', 'tools'),
     ] + fd_datas,
     hiddenimports=[
@@ -30,6 +31,7 @@ a = Analysis(
         'player_colors_pyside',
         'triggerscript_editor',
         'triggerscript_parser',
+        'triggerscript_help',
         'hw2_ai_editor.main',
         'PySide6.QtCore',
         'PySide6.QtGui',

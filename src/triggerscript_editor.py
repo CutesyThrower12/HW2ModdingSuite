@@ -6,12 +6,19 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QUndoCommand, QUndoStack
+from PySide6.QtGui import QBrush, QColor, QPainter, QPen, QUndoCommand, QUndoStack
 from PySide6.QtWidgets import (
     QApplication,
+    QDialog,
     QFileDialog,
     QFormLayout,
     QFrame,
+    QGraphicsEllipseItem,
+    QGraphicsLineItem,
+    QGraphicsRectItem,
+    QGraphicsScene,
+    QGraphicsTextItem,
+    QGraphicsView,
     QGridLayout,
     QHBoxLayout,
     QHeaderView,
@@ -31,6 +38,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from triggerscript_help import (
+    explain_element,
+    modding_tips,
+    simplified_trigger_name,
+    tooltip_for_element,
+    trigger_purpose,
+)
 from triggerscript_parser import (
     MAPPING_TAGS,
     PORT_TAGS,
@@ -66,6 +80,16 @@ QLineEdit, QTextEdit, QTreeWidget, QTableWidget {
     color: #F5F8FF;
     selection-background-color: #2F80ED;
 }
+QTextEdit#HelpText {
+    background: transparent;
+    border: none;
+    color: #D7E6FA;
+}
+QFrame#TipPanel, QFrame#HelpPanel {
+    background: #0D1420;
+    border: 1px solid #273449;
+    border-radius: 8px;
+}
 QLineEdit { padding: 7px 9px; }
 QTreeWidget::item { padding: 5px; border-radius: 4px; }
 QTreeWidget::item:selected { background: #1B3559; }
@@ -86,6 +110,7 @@ QPushButton {
 QPushButton:hover { background: #243249; border-color: #4E6480; }
 QPushButton#PrimaryButton { background: #2F80ED; border-color: #5EA3FF; }
 QPushButton#DangerButton { background: #49202A; border-color: #8B4050; }
+QPushButton:checked { background: #245B8F; border-color: #75D8FF; }
 QTabWidget::pane { border: 1px solid #273449; border-radius: 8px; top: -1px; }
 QTabBar::tab {
     background: #111A27;
@@ -135,6 +160,7 @@ class TriggerScriptEditor(QMainWindow):
         self.runtime_document: TriggerScriptDocument | None = None
         self.current_element: ET.Element | None = None
         self._loading_inspector = False
+        self.beginner_mode = False
         self._build_ui()
 
     def _build_ui(self):
@@ -161,10 +187,24 @@ class TriggerScriptEditor(QMainWindow):
         self.open_runtime_btn = QPushButton("Open Runtime")
         self.save_btn = QPushButton("Save As")
         self.save_btn.setObjectName("PrimaryButton")
+        self.beginner_btn = QPushButton("Beginner Mode")
+        self.beginner_btn.setCheckable(True)
         self.undo_btn = QPushButton("Undo")
         self.redo_btn = QPushButton("Redo")
-        for button in (self.open_btn, self.open_runtime_btn, self.save_btn, self.undo_btn, self.redo_btn):
+        self.open_btn.setToolTip("Open an editable .triggerscript source graph.")
+        self.open_runtime_btn.setToolTip("Open a .triggerscript_runtime file as a read-only comparison/reference.")
+        self.save_btn.setToolTip("Save the editable source script while preserving unknown XML structure.")
+        self.beginner_btn.setToolTip("Simplify the tree, hide runtime/advanced views, and keep explanations open.")
+        self.undo_btn.setToolTip("Undo the last in-memory inspector edit.")
+        self.redo_btn.setToolTip("Redo the last undone inspector edit.")
+        for button in (self.open_btn, self.open_runtime_btn, self.save_btn, self.beginner_btn, self.undo_btn, self.redo_btn):
             header_layout.addWidget(button)
+        self.docs_btn = QPushButton("Hide Tips")
+        self.help_btn = QPushButton("Hide Help")
+        self.docs_btn.setToolTip("Show or hide the built-in triggerscript modding guide.")
+        self.help_btn.setToolTip("Show or hide contextual explanations for the current selection.")
+        header_layout.addWidget(self.docs_btn)
+        header_layout.addWidget(self.help_btn)
         layout.addWidget(header)
 
         self.meta_label = QLabel("No triggerscript loaded.")
@@ -174,13 +214,16 @@ class TriggerScriptEditor(QMainWindow):
         self.tabs = QTabWidget()
         self.structure_tab = QWidget()
         self.compare_tab = QWidget()
+        self.graph_tab = QWidget()
         self.xml_tab = QWidget()
         self.tabs.addTab(self.structure_tab, "Structure")
+        self.tabs.addTab(self.graph_tab, "Graph")
         self.tabs.addTab(self.compare_tab, "Compare")
         self.tabs.addTab(self.xml_tab, "XML Preview")
         layout.addWidget(self.tabs, 1)
 
         self._build_structure_tab()
+        self._build_graph_tab()
         self._build_compare_tab()
         self._build_xml_tab()
         self.setCentralWidget(root)
@@ -190,6 +233,9 @@ class TriggerScriptEditor(QMainWindow):
         self.save_btn.clicked.connect(self.save_as)
         self.undo_btn.clicked.connect(self.undo_stack.undo)
         self.redo_btn.clicked.connect(self.undo_stack.redo)
+        self.beginner_btn.toggled.connect(self.set_beginner_mode)
+        self.docs_btn.clicked.connect(self.toggle_docs_panel)
+        self.help_btn.clicked.connect(self.toggle_help_panel)
         self.search_field.textChanged.connect(self.apply_filter)
         self.tree.currentItemChanged.connect(self.on_tree_selection)
         self.attr_table.itemChanged.connect(self.on_attr_item_changed)
@@ -203,8 +249,23 @@ class TriggerScriptEditor(QMainWindow):
         layout = QVBoxLayout(self.structure_tab)
         self.search_field = QLineEdit()
         self.search_field.setPlaceholderText("Search trigger names, command types, variables, IDs, or parameter values...")
+        self.search_field.setToolTip("Filter the tree by trigger name, command type, variable name, ID, or parameter value.")
         layout.addWidget(self.search_field)
         splitter = QSplitter(Qt.Horizontal)
+        self.docs_panel = QFrame()
+        self.docs_panel.setObjectName("TipPanel")
+        docs_layout = QVBoxLayout(self.docs_panel)
+        docs_title = QLabel("Modding Tips")
+        docs_title.setObjectName("Kicker")
+        docs_title.setToolTip("Built-in beginner documentation for reading and editing trigger scripts.")
+        self.docs_text = QTextEdit()
+        self.docs_text.setObjectName("HelpText")
+        self.docs_text.setReadOnly(True)
+        self.docs_text.setPlainText(modding_tips())
+        docs_layout.addWidget(docs_title)
+        docs_layout.addWidget(self.docs_text, 1)
+        splitter.addWidget(self.docs_panel)
+
         self.tree = QTreeWidget()
         self.tree.setHeaderLabels(["Script Structure"])
         self.tree.header().setStretchLastSection(True)
@@ -217,7 +278,12 @@ class TriggerScriptEditor(QMainWindow):
         self.inspector_title.setObjectName("Title")
         self.inspector_hint = QLabel("Select a trigger, command, variable, mapping, input, or output.")
         self.inspector_hint.setObjectName("Muted")
-        inspector_layout.addWidget(self.inspector_title)
+        inspector_header = QHBoxLayout()
+        inspector_header.addWidget(self.inspector_title, 1)
+        self.what_btn = QPushButton("What Is This?")
+        self.what_btn.setToolTip("Open a deeper explanation for the selected trigger, command, variable, or mapping.")
+        inspector_header.addWidget(self.what_btn)
+        inspector_layout.addLayout(inspector_header)
         inspector_layout.addWidget(self.inspector_hint)
         self.attr_table = QTableWidget(0, 2)
         self.attr_table.setHorizontalHeaderLabels(["Field", "Value"])
@@ -236,8 +302,34 @@ class TriggerScriptEditor(QMainWindow):
         inspector_layout.addWidget(QLabel("Inputs / Outputs / Mappings"))
         inspector_layout.addWidget(self.ports_table, 1)
         splitter.addWidget(inspector)
-        splitter.setSizes([520, 880])
+
+        self.help_panel = QFrame()
+        self.help_panel.setObjectName("HelpPanel")
+        help_layout = QVBoxLayout(self.help_panel)
+        help_title = QLabel("Contextual Help")
+        help_title.setObjectName("Kicker")
+        help_title.setToolTip("Plain-English explanation for the selected item.")
+        self.help_text = QTextEdit()
+        self.help_text.setObjectName("HelpText")
+        self.help_text.setReadOnly(True)
+        self.help_text.setPlainText(explain_element(None).as_plain_text())
+        help_layout.addWidget(help_title)
+        help_layout.addWidget(self.help_text, 1)
+        splitter.addWidget(self.help_panel)
+        splitter.setSizes([280, 520, 760, 340])
         layout.addWidget(splitter, 1)
+        self.what_btn.clicked.connect(self.show_what_is_this)
+
+    def _build_graph_tab(self):
+        layout = QVBoxLayout(self.graph_tab)
+        hint = QLabel("Visual Graph Mode: triggers are nodes, conditions sit on the left side, effects fan out on the right.")
+        hint.setObjectName("Muted")
+        layout.addWidget(hint)
+        self.graph_view = QGraphicsView()
+        self.graph_view.setRenderHint(QPainter.Antialiasing)
+        self.graph_scene = QGraphicsScene(self.graph_view)
+        self.graph_view.setScene(self.graph_scene)
+        layout.addWidget(self.graph_view, 1)
 
     def _build_compare_tab(self):
         layout = QVBoxLayout(self.compare_tab)
@@ -295,11 +387,16 @@ class TriggerScriptEditor(QMainWindow):
         doc = self.document
         if doc is None:
             return
+        if self.beginner_mode and doc.is_runtime:
+            self.meta_label.setText("Beginner Mode hides runtime files. Open the editable .triggerscript source file.")
+            return
         self.current_element = None
         self.meta_label.setText("   ".join(f"{key}: {value}" for key, value in doc.metadata.items() if key in {"Type", "Size", "Variables", "Triggers", "Commands", "Template Mappings", "Mode"}))
         self.populate_tree(doc)
         self.update_xml_preview()
         self.update_compare()
+        self.update_graph()
+        self.update_mode_visibility()
 
     def populate_tree(self, doc: TriggerScriptDocument):
         self.tree.clear()
@@ -307,62 +404,86 @@ class TriggerScriptEditor(QMainWindow):
         root_item.setData(0, Qt.UserRole, doc.script_root)
         self.tree.addTopLevelItem(root_item)
 
-        self._add_metadata_node(root_item, doc)
+        if not self.beginner_mode:
+            self._add_metadata_node(root_item, doc)
         vars_item = QTreeWidgetItem(["Variables"])
         root_item.addChild(vars_item)
         for var in doc.variables:
             item = QTreeWidgetItem([var.display_name])
             item.setData(0, Qt.UserRole, var.element)
+            item.setToolTip(0, tooltip_for_element(var.element, doc.is_runtime))
             vars_item.addChild(item)
 
+        trigger_parents: dict[str, QTreeWidgetItem] = {}
         triggers_item = QTreeWidgetItem(["Triggers"])
         root_item.addChild(triggers_item)
+        if self.beginner_mode:
+            for group_name in ("Objectives", "Waves", "AI / Player Logic", "Cinematics", "Misc"):
+                group_item = QTreeWidgetItem([group_name])
+                group_item.setToolTip(0, f"Beginner grouping for {group_name.lower()} related trigger logic.")
+                triggers_item.addChild(group_item)
+                trigger_parents[group_name] = group_item
         for trigger in doc.triggers:
-            trigger_item = QTreeWidgetItem([trigger.display_name])
+            trigger_item = QTreeWidgetItem([simplified_trigger_name(trigger.element) if self.beginner_mode else trigger.display_name])
             trigger_item.setData(0, Qt.UserRole, trigger.element)
-            triggers_item.addChild(trigger_item)
+            trigger_item.setToolTip(0, tooltip_for_element(trigger.element, doc.is_runtime))
+            parent = trigger_parents.get(trigger_purpose(trigger.element), triggers_item)
+            parent.addChild(trigger_item)
             branches: dict[str, QTreeWidgetItem] = {}
             for command in trigger.commands:
                 branch_item = branches.get(command.branch)
                 if branch_item is None:
-                    branch_item = QTreeWidgetItem([command.branch])
+                    branch_item = QTreeWidgetItem([self._friendly_branch_name(command.branch) if self.beginner_mode else command.branch])
+                    branch_item.setToolTip(0, self._branch_tooltip(command.branch))
                     branches[command.branch] = branch_item
                     trigger_item.addChild(branch_item)
-                command_item = QTreeWidgetItem([command.display_name])
+                command_item = QTreeWidgetItem([self._friendly_command_name(command.element) if self.beginner_mode else command.display_name])
                 command_item.setData(0, Qt.UserRole, command.element)
+                command_item.setToolTip(0, tooltip_for_element(command.element, doc.is_runtime))
                 branch_item.addChild(command_item)
-                for port in command.ports:
-                    port_item = QTreeWidgetItem([element_label(port)])
-                    port_item.setData(0, Qt.UserRole, port)
-                    command_item.addChild(port_item)
+                if not self.beginner_mode:
+                    for port in command.ports:
+                        port_item = QTreeWidgetItem([element_label(port)])
+                        port_item.setData(0, Qt.UserRole, port)
+                        port_item.setToolTip(0, tooltip_for_element(port, doc.is_runtime))
+                        command_item.addChild(port_item)
 
-        mappings_item = QTreeWidgetItem(["Template Mappings"])
-        root_item.addChild(mappings_item)
-        for mapping in doc.mappings:
-            item = QTreeWidgetItem([mapping.display_name])
-            item.setData(0, Qt.UserRole, mapping.element)
-            mappings_item.addChild(item)
-            for child in child_elements(mapping.element, MAPPING_TAGS):
-                port_item = QTreeWidgetItem([element_label(child)])
-                port_item.setData(0, Qt.UserRole, child)
-                item.addChild(port_item)
+        if not self.beginner_mode:
+            mappings_item = QTreeWidgetItem(["Template Mappings"])
+            root_item.addChild(mappings_item)
+            for mapping in doc.mappings:
+                item = QTreeWidgetItem([mapping.display_name])
+                item.setData(0, Qt.UserRole, mapping.element)
+                item.setToolTip(0, tooltip_for_element(mapping.element, doc.is_runtime))
+                mappings_item.addChild(item)
+                for child in child_elements(mapping.element, MAPPING_TAGS):
+                    port_item = QTreeWidgetItem([element_label(child)])
+                    port_item.setData(0, Qt.UserRole, child)
+                    port_item.setToolTip(0, tooltip_for_element(child, doc.is_runtime))
+                    item.addChild(port_item)
 
-        notes_item = QTreeWidgetItem([f"Notes ({len(doc.notes)})"])
-        root_item.addChild(notes_item)
-        for note in doc.notes:
-            item = QTreeWidgetItem([note.findtext("Title") or element_label(note)])
-            item.setData(0, Qt.UserRole, note)
-            notes_item.addChild(item)
+            notes_item = QTreeWidgetItem([f"Notes ({len(doc.notes)})"])
+            root_item.addChild(notes_item)
+            for note in doc.notes:
+                item = QTreeWidgetItem([note.findtext("Title") or element_label(note)])
+                item.setData(0, Qt.UserRole, note)
+                item.setToolTip(0, tooltip_for_element(note, doc.is_runtime))
+                notes_item.addChild(item)
 
-        groups_item = QTreeWidgetItem([f"UI Groups ({len(doc.groups)})"])
-        root_item.addChild(groups_item)
-        for group in doc.groups:
-            item = QTreeWidgetItem([group.get("Name") or group.findtext("Title") or element_label(group)])
-            item.setData(0, Qt.UserRole, group)
-            groups_item.addChild(item)
+            groups_item = QTreeWidgetItem([f"UI Groups ({len(doc.groups)})"])
+            root_item.addChild(groups_item)
+            for group in doc.groups:
+                item = QTreeWidgetItem([group.get("Name") or group.findtext("Title") or element_label(group)])
+                item.setData(0, Qt.UserRole, group)
+                item.setToolTip(0, tooltip_for_element(group, doc.is_runtime))
+                groups_item.addChild(item)
 
         root_item.setExpanded(True)
         triggers_item.setExpanded(True)
+        if self.beginner_mode:
+            vars_item.setHidden(True)
+            for index in range(triggers_item.childCount()):
+                triggers_item.child(index).setExpanded(True)
 
     def _add_metadata_node(self, root_item: QTreeWidgetItem, doc: TriggerScriptDocument):
         meta_item = QTreeWidgetItem(["Metadata"])
@@ -385,8 +506,12 @@ class TriggerScriptEditor(QMainWindow):
         if element is None:
             self.inspector_title.setText("Inspector")
             self.inspector_hint.setText("Select a structured item.")
+            self.help_text.setPlainText(explain_element(None).as_plain_text())
             self._loading_inspector = False
             return
+        doc = self.document
+        is_runtime = bool(doc and doc.is_runtime)
+        self.help_text.setPlainText(explain_element(element, is_runtime).as_plain_text())
         self.inspector_title.setText(element_label(element))
         self.inspector_hint.setText(f"XML node: {element.tag}")
         editable = self.is_current_editable()
@@ -465,6 +590,72 @@ class TriggerScriptEditor(QMainWindow):
             item.setExpanded(True)
         return visible
 
+    def set_beginner_mode(self, enabled: bool):
+        self.beginner_mode = enabled
+        self.beginner_btn.setText("Beginner Mode On" if enabled else "Beginner Mode")
+        if enabled:
+            self.help_panel.show()
+            self.help_btn.setText("Hide Help")
+        if self.document is not None:
+            self.populate()
+        self.update_mode_visibility()
+
+    def update_mode_visibility(self):
+        self.open_runtime_btn.setVisible(not self.beginner_mode)
+        compare_index = self.tabs.indexOf(self.compare_tab)
+        if compare_index >= 0:
+            self.tabs.setTabVisible(compare_index, not self.beginner_mode)
+        xml_index = self.tabs.indexOf(self.xml_tab)
+        if xml_index >= 0:
+            self.tabs.setTabVisible(xml_index, not self.beginner_mode)
+
+    def toggle_docs_panel(self):
+        self.docs_panel.setVisible(not self.docs_panel.isVisible())
+        self.docs_btn.setText("Hide Tips" if self.docs_panel.isVisible() else "Show Tips")
+
+    def toggle_help_panel(self):
+        self.help_panel.setVisible(not self.help_panel.isVisible())
+        self.help_btn.setText("Hide Help" if self.help_panel.isVisible() else "Show Help")
+
+    def show_what_is_this(self):
+        doc = self.document
+        help_content = explain_element(self.current_element, bool(doc and doc.is_runtime))
+        dialog = QDialog(self)
+        dialog.setWindowTitle(help_content.title)
+        dialog.resize(720, 620)
+        layout = QVBoxLayout(dialog)
+        text = QTextEdit()
+        text.setReadOnly(True)
+        text.setPlainText(help_content.as_plain_text())
+        layout.addWidget(text, 1)
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(dialog.accept)
+        layout.addWidget(close_btn, alignment=Qt.AlignRight)
+        dialog.exec()
+
+    def _friendly_branch_name(self, branch: str) -> str:
+        return {
+            "TriggerConditions": "When this is true",
+            "TriggerEffectsOnTrue": "Then do this",
+            "TriggerEffectsOnFalse": "Otherwise do this",
+        }.get(branch, branch)
+
+    def _branch_tooltip(self, branch: str) -> str:
+        return {
+            "TriggerConditions": "Conditions are questions the trigger checks.",
+            "TriggerEffectsOnTrue": "Effects here run when all required conditions pass.",
+            "TriggerEffectsOnFalse": "Effects here run when conditions fail.",
+        }.get(branch, "Trigger branch")
+
+    def _friendly_command_name(self, element: ET.Element) -> str:
+        tag = element.tag.rsplit("}", 1)[-1]
+        command_type = element.get("Type") or tag
+        if tag == "Condition":
+            return f"Check: {command_type}"
+        if tag == "Effect":
+            return f"Do: {command_type}"
+        return element_label(element)
+
     def update_xml_preview(self):
         doc = self.document
         if doc is None:
@@ -486,6 +677,58 @@ class TriggerScriptEditor(QMainWindow):
         for row, values in enumerate(rows):
             for col, value in enumerate(values):
                 self.compare_table.setItem(row, col, QTableWidgetItem(value))
+
+    def update_graph(self):
+        self.graph_scene.clear()
+        doc = self.document
+        if doc is None:
+            return
+        x = 40
+        y = 40
+        node_w = 220
+        node_h = 76
+        gap_y = 130
+        max_nodes = 40 if self.beginner_mode else 80
+        for idx, trigger in enumerate(doc.triggers[:max_nodes]):
+            ty = y + idx * gap_y
+            rect = QGraphicsRectItem(x, ty, node_w, node_h)
+            rect.setBrush(QBrush(QColor("#111A27")))
+            rect.setPen(QPen(QColor("#54A6FF" if trigger.active == "true" else "#56657A"), 1.5))
+            self.graph_scene.addItem(rect)
+            title = QGraphicsTextItem(trigger.name or trigger.id or "Trigger")
+            title.setDefaultTextColor(QColor("#EEF4FF"))
+            title.setTextWidth(node_w - 16)
+            title.setPos(x + 8, ty + 8)
+            self.graph_scene.addItem(title)
+            cond_count = len([cmd for cmd in trigger.commands if cmd.branch == "TriggerConditions"])
+            true_count = len([cmd for cmd in trigger.commands if cmd.branch == "TriggerEffectsOnTrue"])
+            false_count = len([cmd for cmd in trigger.commands if cmd.branch == "TriggerEffectsOnFalse"])
+            detail = QGraphicsTextItem(f"Checks: {cond_count}   True: {true_count}   False: {false_count}")
+            detail.setDefaultTextColor(QColor("#AAB8CA"))
+            detail.setPos(x + 8, ty + 44)
+            self.graph_scene.addItem(detail)
+            for col, (label, count, color) in enumerate((
+                ("C", cond_count, "#75D8FF"),
+                ("T", true_count, "#58F29A"),
+                ("F", false_count, "#FF7A90"),
+            )):
+                cx = x + node_w + 80 + col * 72
+                ellipse = QGraphicsEllipseItem(cx, ty + 18, 42, 42)
+                ellipse.setBrush(QBrush(QColor(color)))
+                ellipse.setPen(QPen(QColor("#0B1018"), 1))
+                self.graph_scene.addItem(ellipse)
+                line = QGraphicsLineItem(x + node_w, ty + node_h / 2, cx, ty + 39)
+                line.setPen(QPen(QColor("#2C394C"), 1))
+                self.graph_scene.addItem(line)
+                label_item = QGraphicsTextItem(f"{label}:{count}")
+                label_item.setDefaultTextColor(QColor("#061018"))
+                label_item.setPos(cx + 7, ty + 28)
+                self.graph_scene.addItem(label_item)
+        if len(doc.triggers) > max_nodes:
+            note = QGraphicsTextItem(f"Showing first {max_nodes} of {len(doc.triggers)} triggers. Use search/structure for the full script.")
+            note.setDefaultTextColor(QColor("#FFD166"))
+            note.setPos(40, y + max_nodes * gap_y + 20)
+            self.graph_scene.addItem(note)
 
     def save_as(self):
         doc = self.document
