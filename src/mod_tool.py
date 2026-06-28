@@ -191,6 +191,9 @@ if "--player-colors-editor" in sys.argv:
 if "--ai-editor" in sys.argv:
     from hw2_ai_editor.main import main as _ai_editor_main
     raise SystemExit(_ai_editor_main())
+if "--triggerscript-editor" in sys.argv:
+    from triggerscript_editor import main as _triggerscript_editor_main
+    raise SystemExit(_triggerscript_editor_main())
 if not hasattr(flet, "icons"):
     class _Icons:
         def __getattr__(self, name: str) -> str:
@@ -2213,6 +2216,36 @@ def main(page: Page):
                         pass
                 page.update()
 
+            def launch_triggerscript_editor(e=None):
+                """Launch the PySide HW2 Triggerscript Editor as a separate process."""
+                try:
+                    editor_path = os.path.join(SRC_DIR, "triggerscript_editor.py")
+                    if not getattr(sys, "frozen", False) and not os.path.exists(editor_path):
+                        page.snack_bar = SnackBar(Text("Triggerscript Editor script not found."), open=True)
+                        page.update()
+                        return
+
+                    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+                    if getattr(sys, "frozen", False):
+                        subprocess.Popen(
+                            [sys.executable, "--triggerscript-editor"],
+                            cwd=BASE_DIR,
+                            creationflags=creationflags,
+                        )
+                    else:
+                        subprocess.Popen(
+                            [sys.executable or "python", editor_path],
+                            cwd=SRC_DIR,
+                            creationflags=creationflags,
+                        )
+                    page.snack_bar = SnackBar(Text("Launched HW2 Triggerscript Editor."), open=True)
+                except Exception as ex:
+                    try:
+                        page.snack_bar = SnackBar(Text(f"Failed to launch HW2 Triggerscript Editor: {ex}"), open=True)
+                    except Exception:
+                        pass
+                page.update()
+
             phx_content = Container(
                 Column([
                     Text("Phoenix Tools", size=20, weight="bold"),
@@ -2531,6 +2564,7 @@ def main(page: Page):
             tools_secondary = Row([
                 action_card("CRC32 Calculator", "Compute CRC-32 for files in hex and decimal formats.", "Open", lambda ev: set_top_content(crc_content), TEAL),
                 action_card("AI Strategy Editor", "Edit Halo Wars 2 AI strategy tables, missions, directives, and validation.", "Launch", launch_ai_editor, ACCENT_BLUE),
+                action_card("Triggerscript Editor", "Inspect, compare, and safely edit trigger graph XML.", "Launch", launch_triggerscript_editor, ACCENT_GREEN),
             ], spacing=16, expand=True)
 
             tools_list = Column([
