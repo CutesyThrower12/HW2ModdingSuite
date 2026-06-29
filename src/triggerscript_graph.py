@@ -623,6 +623,8 @@ class BlueprintGraphView(QGraphicsView):
         super().__init__(scene)
         self.grid_color = QColor("#172234")
         self.grid_major_color = QColor("#273449")
+        self._right_panning = False
+        self._last_pan_pos = None
         self.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing | QPainter.SmoothPixmapTransform)
         self.setDragMode(QGraphicsView.RubberBandDrag)
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
@@ -658,6 +660,37 @@ class BlueprintGraphView(QGraphicsView):
         target = max(0.18, min(3.0, current * factor))
         self.scale(target / current, target / current)
         event.accept()
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.RightButton:
+            self._right_panning = True
+            self._last_pan_pos = event.position().toPoint()
+            self.setDragMode(QGraphicsView.NoDrag)
+            self.viewport().setCursor(Qt.ClosedHandCursor)
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._right_panning and self._last_pan_pos is not None:
+            pos = event.position().toPoint()
+            delta = pos - self._last_pan_pos
+            self._last_pan_pos = pos
+            self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - delta.x())
+            self.verticalScrollBar().setValue(self.verticalScrollBar().value() - delta.y())
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.RightButton and self._right_panning:
+            self._right_panning = False
+            self._last_pan_pos = None
+            self.setDragMode(QGraphicsView.RubberBandDrag)
+            self.viewport().unsetCursor()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
     def frame_all(self) -> None:
         items = self.scene().items()
