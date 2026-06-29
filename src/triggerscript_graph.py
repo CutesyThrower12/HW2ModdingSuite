@@ -649,11 +649,15 @@ class BlueprintGraphView(QGraphicsView):
             y += grid_size
 
     def wheelEvent(self, event) -> None:
-        factor = 1.0015 ** event.angleDelta().y()
+        delta = event.angleDelta().y() or event.pixelDelta().y()
+        if not delta:
+            event.ignore()
+            return
+        factor = 1.15 ** (delta / 120.0)
         current = self.transform().m11()
-        next_scale = current * factor
-        if 0.22 <= next_scale <= 2.2:
-            self.scale(factor, factor)
+        target = max(0.18, min(3.0, current * factor))
+        self.scale(target / current, target / current)
+        event.accept()
 
     def frame_all(self) -> None:
         items = self.scene().items()
