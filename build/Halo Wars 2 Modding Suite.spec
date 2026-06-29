@@ -23,6 +23,7 @@ a = Analysis(
         ('src\\triggerscript_editor.py', '.'),
         ('src\\triggerscript_parser.py', '.'),
         ('src\\triggerscript_help.py', '.'),
+        ('src\\triggerscript_graph.py', '.'),
         ('tools', 'tools'),
     ] + fd_datas,
     hiddenimports=[
@@ -32,6 +33,7 @@ a = Analysis(
         'triggerscript_editor',
         'triggerscript_parser',
         'triggerscript_help',
+        'triggerscript_graph',
         'hw2_ai_editor.main',
         'PySide6.QtCore',
         'PySide6.QtGui',

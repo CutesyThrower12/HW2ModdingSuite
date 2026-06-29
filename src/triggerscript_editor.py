@@ -6,20 +6,13 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QBrush, QColor, QPainter, QPen, QUndoCommand, QUndoStack
+from PySide6.QtGui import QUndoCommand, QUndoStack
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
     QFileDialog,
     QFormLayout,
     QFrame,
-    QGraphicsEllipseItem,
-    QGraphicsLineItem,
-    QGraphicsRectItem,
-    QGraphicsScene,
-    QGraphicsTextItem,
-    QGraphicsView,
-    QGridLayout,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -38,6 +31,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from triggerscript_graph import BlueprintGraphScene, BlueprintGraphView, default_graph_registry
 from triggerscript_help import (
     explain_element,
     modding_tips,
@@ -322,14 +316,43 @@ class TriggerScriptEditor(QMainWindow):
 
     def _build_graph_tab(self):
         layout = QVBoxLayout(self.graph_tab)
-        hint = QLabel("Visual Graph Mode: triggers are nodes, conditions sit on the left side, effects fan out on the right.")
+        toolbar = QHBoxLayout()
+        hint = QLabel("Blueprint Graph: drag nodes, wire output pins to input pins, double-click nodes to collapse, DEL deletes, CTRL+D duplicates.")
         hint.setObjectName("Muted")
-        layout.addWidget(hint)
-        self.graph_view = QGraphicsView()
-        self.graph_view.setRenderHint(QPainter.Antialiasing)
-        self.graph_scene = QGraphicsScene(self.graph_view)
-        self.graph_view.setScene(self.graph_scene)
+        toolbar.addWidget(hint, 1)
+        self.graph_snap_btn = QPushButton("Snap")
+        self.graph_snap_btn.setCheckable(True)
+        self.graph_snap_btn.setChecked(True)
+        self.graph_snap_btn.setToolTip("Snap moved and resized graph nodes to the current grid.")
+        self.graph_grid_btn = QPushButton("Compact Grid")
+        self.graph_grid_btn.setCheckable(True)
+        self.graph_grid_btn.setToolTip("Switch between roomy and compact graph grid spacing.")
+        self.graph_align_btn = QPushButton("Auto Align")
+        self.graph_align_btn.setToolTip("Arrange nodes into readable columns.")
+        self.graph_frame_btn = QPushButton("Frame All")
+        self.graph_frame_btn.setToolTip("Zoom the graph view to show all current nodes.")
+        for button in (self.graph_snap_btn, self.graph_grid_btn, self.graph_align_btn, self.graph_frame_btn):
+            toolbar.addWidget(button)
+        layout.addLayout(toolbar)
+        self.graph_registry = default_graph_registry()
+        self.graph_scene = BlueprintGraphScene(self.graph_registry, self.inspect_element)
+        self.graph_view = BlueprintGraphView(self.graph_scene)
         layout.addWidget(self.graph_view, 1)
+        self.graph_status = QLabel("Open a triggerscript to build the Blueprint graph.")
+        self.graph_status.setObjectName("Muted")
+        layout.addWidget(self.graph_status)
+        self.graph_preview = QTextEdit()
+        self.graph_preview.setObjectName("HelpText")
+        self.graph_preview.setReadOnly(True)
+        self.graph_preview.setMaximumHeight(116)
+        self.graph_preview.setPlainText(
+            "Live preview will summarize selected node effects, variable references, runtime expansion notes, and validation warnings."
+        )
+        layout.addWidget(self.graph_preview)
+        self.graph_snap_btn.toggled.connect(self.set_graph_snap)
+        self.graph_grid_btn.toggled.connect(self.set_graph_grid_density)
+        self.graph_align_btn.clicked.connect(self.auto_align_graph)
+        self.graph_frame_btn.clicked.connect(self.graph_view.frame_all)
 
     def _build_compare_tab(self):
         layout = QVBoxLayout(self.compare_tab)
@@ -507,11 +530,13 @@ class TriggerScriptEditor(QMainWindow):
             self.inspector_title.setText("Inspector")
             self.inspector_hint.setText("Select a structured item.")
             self.help_text.setPlainText(explain_element(None).as_plain_text())
+            self.update_graph_preview(None)
             self._loading_inspector = False
             return
         doc = self.document
         is_runtime = bool(doc and doc.is_runtime)
         self.help_text.setPlainText(explain_element(element, is_runtime).as_plain_text())
+        self.update_graph_preview(element)
         self.inspector_title.setText(element_label(element))
         self.inspector_hint.setText(f"XML node: {element.tag}")
         editable = self.is_current_editable()
@@ -564,6 +589,7 @@ class TriggerScriptEditor(QMainWindow):
 
     def after_edit(self):
         self.update_xml_preview()
+        self.update_graph()
         current = self.tree.currentItem()
         element = self.current_element
         if current and element is not None:
@@ -679,56 +705,69 @@ class TriggerScriptEditor(QMainWindow):
                 self.compare_table.setItem(row, col, QTableWidgetItem(value))
 
     def update_graph(self):
-        self.graph_scene.clear()
+        status = self.graph_scene.build_from_document(self.document, self.beginner_mode)
+        self.graph_status.setText(status)
+        self.graph_view.frame_all()
+
+    def set_graph_snap(self, enabled: bool):
+        self.graph_scene.snap_to_grid = enabled
+        self.graph_snap_btn.setText("Snap On" if enabled else "Snap Off")
+
+    def set_graph_grid_density(self, compact: bool):
+        self.graph_scene.grid_size = 16 if compact else 24
+        self.graph_grid_btn.setText("Roomy Grid" if compact else "Compact Grid")
+        self.graph_view.viewport().update()
+
+    def auto_align_graph(self):
+        self.graph_scene.auto_align()
+        self.graph_view.frame_all()
+
+    def update_graph_preview(self, element: ET.Element | None):
+        if not hasattr(self, "graph_preview"):
+            return
+        doc = self.document
+        if element is None:
+            self.graph_preview.setPlainText(
+                "Select a Blueprint node to see variable changes, affected trigger hints, runtime expansion notes, and validation warnings."
+            )
+            return
+        help_content = explain_element(element, bool(doc and doc.is_runtime))
+        warnings = self.graph_registry.validate(element, doc) if doc is not None else []
+        affected = self._affected_trigger_summary(element)
+        preview = [
+            help_content.summary,
+            "",
+            f"Variable changes: {self._variable_change_summary(element)}",
+            f"Affected triggers: {affected}",
+            f"Runtime expansion: {help_content.runtime_notes}",
+            "Warnings:",
+        ]
+        preview.extend(f"- {warning}" for warning in warnings)
+        if not warnings:
+            preview.append("- No graph validation warnings for this node.")
+        self.graph_preview.setPlainText("\n".join(preview))
+
+    def _variable_change_summary(self, element: ET.Element) -> str:
+        ports = child_elements(element, PORT_TAGS)
+        refs = [element_text(port) for port in ports if element_text(port).startswith("#")]
+        if refs:
+            return ", ".join(refs[:6])
+        if element.tag.rsplit("}", 1)[-1] == "TriggerVar":
+            return f"{element.get('Name') or element.get('ID')}: {element_text(element) or '(empty)'}"
+        return "No direct variable references detected."
+
+    def _affected_trigger_summary(self, element: ET.Element) -> str:
         doc = self.document
         if doc is None:
-            return
-        x = 40
-        y = 40
-        node_w = 220
-        node_h = 76
-        gap_y = 130
-        max_nodes = 40 if self.beginner_mode else 80
-        for idx, trigger in enumerate(doc.triggers[:max_nodes]):
-            ty = y + idx * gap_y
-            rect = QGraphicsRectItem(x, ty, node_w, node_h)
-            rect.setBrush(QBrush(QColor("#111A27")))
-            rect.setPen(QPen(QColor("#54A6FF" if trigger.active == "true" else "#56657A"), 1.5))
-            self.graph_scene.addItem(rect)
-            title = QGraphicsTextItem(trigger.name or trigger.id or "Trigger")
-            title.setDefaultTextColor(QColor("#EEF4FF"))
-            title.setTextWidth(node_w - 16)
-            title.setPos(x + 8, ty + 8)
-            self.graph_scene.addItem(title)
-            cond_count = len([cmd for cmd in trigger.commands if cmd.branch == "TriggerConditions"])
-            true_count = len([cmd for cmd in trigger.commands if cmd.branch == "TriggerEffectsOnTrue"])
-            false_count = len([cmd for cmd in trigger.commands if cmd.branch == "TriggerEffectsOnFalse"])
-            detail = QGraphicsTextItem(f"Checks: {cond_count}   True: {true_count}   False: {false_count}")
-            detail.setDefaultTextColor(QColor("#AAB8CA"))
-            detail.setPos(x + 8, ty + 44)
-            self.graph_scene.addItem(detail)
-            for col, (label, count, color) in enumerate((
-                ("C", cond_count, "#75D8FF"),
-                ("T", true_count, "#58F29A"),
-                ("F", false_count, "#FF7A90"),
-            )):
-                cx = x + node_w + 80 + col * 72
-                ellipse = QGraphicsEllipseItem(cx, ty + 18, 42, 42)
-                ellipse.setBrush(QBrush(QColor(color)))
-                ellipse.setPen(QPen(QColor("#0B1018"), 1))
-                self.graph_scene.addItem(ellipse)
-                line = QGraphicsLineItem(x + node_w, ty + node_h / 2, cx, ty + 39)
-                line.setPen(QPen(QColor("#2C394C"), 1))
-                self.graph_scene.addItem(line)
-                label_item = QGraphicsTextItem(f"{label}:{count}")
-                label_item.setDefaultTextColor(QColor("#061018"))
-                label_item.setPos(cx + 7, ty + 28)
-                self.graph_scene.addItem(label_item)
-        if len(doc.triggers) > max_nodes:
-            note = QGraphicsTextItem(f"Showing first {max_nodes} of {len(doc.triggers)} triggers. Use search/structure for the full script.")
-            note.setDefaultTextColor(QColor("#FFD166"))
-            note.setPos(40, y + max_nodes * gap_y + 20)
-            self.graph_scene.addItem(note)
+            return "No loaded source document."
+        element_id = element.get("ID")
+        owners = []
+        for trigger in doc.triggers:
+            if trigger.element is element or any(command.element is element for command in trigger.commands):
+                owners.append(trigger.name or trigger.id or "(unnamed trigger)")
+            elif element_id and any(element_id in element_text(port) for command in trigger.commands for port in child_elements(command.element, PORT_TAGS)):
+                owners.append(trigger.name or trigger.id or "(unnamed trigger)")
+        return ", ".join(owners[:5]) if owners else "No direct trigger ownership/reference found."
 
     def save_as(self):
         doc = self.document
